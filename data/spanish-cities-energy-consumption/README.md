@@ -18,9 +18,9 @@ This data is publicly available via ENTSOE and REE and may be found in the links
 
 The dataset is unique because it contains hourly data for electrical consumption and the respective forecasts by the TSO for consumption and pricing. This allows prospective forecasts to be benchmarked against the current state of the art forecasts being used in industry.
 
-Visualize the load and marginal supply curves.
-What weather measurements, and cities influence most the electrical demand, prices, generation capacity?
-Can we forecast 24 hours in advance better than the TSO?
-Can we predict electrical price by time of day better than TSO?
-Forecast intraday price or electrical demand hour-by-hour.
-What is the next generation source to be activated on the load curve?
+- Visualize the load and marginal supply curves.
+- What weather measurements, and cities influence most the electrical demand, prices, generation capacity?
+- Can we forecast 24 hours in advance better than the TSO?
+- Can we predict electrical price by time of day better than TSO?
+- Forecast intraday price or electrical demand hour-by-hour.
+- What is the next generation source to be activated on the load curve?
