@@ -41,15 +41,14 @@ def build_pipeline(data_dir_or_paths, ffill_amt=3, sampling_interval=1, drop_na=
 
 
 if __name__ == "__main__":
-    data_dir = ''#os.environ.get("DATA_DIR", ".")
+    data_dir = '.\data'#os.environ.get("DATA_DIR", ".")
 
     target_col = 'total_renewable_generation'
 
     pipeline = build_pipeline(
         data_dir_or_paths=data_dir,
         ffill_amt=3,
-        sampling_interval=1,
-        drop_na=True,
+        drop_na=False, #drop rows with any NaN after ffill
         load_pickle_instead=None,
         save_pickle=True,
         N_past_values=48,

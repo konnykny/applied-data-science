@@ -5,7 +5,7 @@ from typing import List, Dict
 from joblib import delayed, Parallel
 import pvlib
 from pvlib.location import Location
-from pycatch22 import catch22_all
+import pycatch22
 
 import numpy as np
 import pandas as pd
@@ -280,21 +280,11 @@ class WeatherFeaturesExtractor(BaseEstimator, TransformerMixin):
 
         X = X.copy()
         sun_features = self.compute_sun_features(X)
-        wind_features = self.compute_wind_deg_interactions(X)
-        X = pd.concat([X, wind_features, sun_features], axis=1)
+        X = pd.concat([X, sun_features], axis=1)
         return X
 
     def fit_transform(self, X: pd.DataFrame, y: pd.DataFrame = None) -> pd.DataFrame:
         return self.fit(X, y).transform(X)
-
-    def compute_wind_deg_interactions(self, X: pd.DataFrame) -> pd.DataFrame:
-
-        result_df = pd.DataFrame()
-        for city in self.cities:
-            result_df[f'{city} wind_sin_speed'] = X[f'{city} wind_speed'] * np.sin(np.deg2rad(X[f'{city} wind_deg']))
-            result_df[f'{city} wind_cos_speed'] = X[f'{city} wind_speed'] * np.cos(np.deg2rad(X[f'{city} wind_deg']))
-        assert pd.isna(result_df).values.sum() == 0
-        return result_df
 
     def compute_sun_features(self, X: pd.DataFrame) -> pd.DataFrame:
 
@@ -302,8 +292,7 @@ class WeatherFeaturesExtractor(BaseEstimator, TransformerMixin):
         for city in self.cities:
             city_lat, city_lon = self.city_lat_lon[city]
             # get the solar featiures
-            city_fea_df = self.generate_pv_wind_features(lat=city_lat, lon=city_lon,
-                                                         datetimes=pd.to_datetime(X['time'].copy()))
+            city_fea_df = self.generate_pv_wind_features(lat=city_lat, lon=city_lon, datetimes=pd.to_datetime(X['time'].copy()))
             # reindex if nescessary
             if not city_fea_df.index.equals(X.index):
                 city_fea_df = city_fea_df.reindex(X.index)
@@ -333,3 +322,5 @@ class WeatherFeaturesExtractor(BaseEstimator, TransformerMixin):
         features = features.reset_index(drop=True)
 
         return features
+    
+    
