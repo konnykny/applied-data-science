@@ -45,7 +45,7 @@ def build_pipeline(data_dir_or_paths, ffill_amt=3, sampling_interval=1, drop_na=
 
 
 if __name__ == "__main__":
-    data_dir = '.\data'#os.environ.get("DATA_DIR", ".")
+    data_dir = './data'#os.environ.get("DATA_DIR", ".")
 
     target_col = 'total load actual'
 

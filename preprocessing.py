@@ -42,7 +42,7 @@ def _load_csv(path: str) -> pd.DataFrame:
     dt_col = _find_datetime_column(df)
 
     # preserve original textual timestamp (keeps the offset like +01:00 / +02:00)
-    df[f"{dt_col}__original_tz"] = df[dt_col].astype(str)
+    df[f"{dt_col}__original_tz"] = df[dt_col].astype(str).copy(deep=True)
 
     # Parse timestamps to UTC (handles strings with offsets like +01:00 / +02:00)
     df[dt_col] = pd.to_datetime(df[dt_col], errors="coerce", utc=True)

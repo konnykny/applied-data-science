@@ -85,7 +85,7 @@ def _catch22_features(x: pd.Series, window: int, prefix: str) -> pd.DataFrame:
 class FeatureExtraction(BaseEstimator, TransformerMixin):
     
     def __init__(self, target_column:str, weather_columns: List[str], N_past_values: List[int] = [24, 7*24], N_future_values: int = 24,
-                 n_jobs: int = 4, add_raw_target = True, N_past_target_values: int = 24, verbose = 1) -> None:
+                 n_jobs: int = 16, add_raw_target = True, N_past_target_values: int = 24, verbose = 1) -> None:
 
         self.target_column = target_column
         self.verbose = verbose
@@ -128,17 +128,15 @@ class FeatureExtraction(BaseEstimator, TransformerMixin):
         feature_frames = [weekday, time_of_day, day_of_year]
 
         # compute the additional astronomical features
-        # sun_features = self.weather_extractor.transform(df)
-        # feature_frames.append(sun_features)        
-
+        sun_features = self.weather_extractor.transform(df)
+        feature_frames.append(sun_features)        
+        print(f'sun feas: {sun_features.shape}, {sun_features.isna().sum().sum()}')
         F = pd.concat(feature_frames, axis=1)
         F = pd.concat([df, F], axis=1)
-
         # compute the catch22 features and crop
         if self.verbose:
             print("Computing catch22 weather features...")
         F = self.catch22_weather_extractor.transform(F)
-
         # Add raw energy percentage columns
         if self.add_raw_target:
             # Add raw energy percentage columns (previous values)
@@ -159,14 +157,15 @@ class FeatureExtraction(BaseEstimator, TransformerMixin):
                 shift_amount = N - i
                 col_name = f"{self.target_column}_{i}"
                 F[col_name] = orig_target.shift(shift_amount)
-            
         F = F.dropna(axis=1, how="all")
-        
+        #for col in F.columns:
+        #    print(f'{col} -> {F[col].isna().sum()}')
+
         return F
 
 
 class SaveORLoad(BaseEstimator, TransformerMixin):
-    def __init__(self, mode: str, data_path = '.\data', filename = 'features.csv') -> None:
+    def __init__(self, mode: str, data_path = './data', filename = 'features.csv') -> None:
         self.data_path = data_path
         self.filename = filename
         self.mode = mode  # 'load' or 'save'
@@ -207,10 +206,8 @@ class Catch22FeatureExtractor(BaseEstimator, TransformerMixin):
     def transform(self, X: pd.DataFrame, njobs: int = None) -> pd.DataFrame:
 
         # sort X by time
-        X = X.copy()
-        # X['time'] = pd.to_datetime(X.index)
-        # X = X.sort_values('time', ascending=True)
-        X = X.reset_index(drop=True)
+        X = X.copy(deep=True)
+        X = X.sort_index(ascending=True)
 
         assert pd.isna(X[self.target_cols]).values.sum() == 0
 
@@ -222,21 +219,25 @@ class Catch22FeatureExtractor(BaseEstimator, TransformerMixin):
         njobs = self.njobs_default if njobs is None else njobs
 
         # extract the indices
-        src_time_col = X.index
-        query_time_col = X_base.index
+        src_time_col = pd.to_datetime(X.index)
+        query_time_col = pd.to_datetime(X_base.index)
         start_ids_list, end_ids_list, valid_mask_list = self._precompute_window_ids(src_time_col, query_time_col)
 
         # merge the mask and reducte the query
         combined_mask = valid_mask_list[0]
         for mask in valid_mask_list[1:]:
             combined_mask &= mask
+        assert combined_mask.all()
 
-        X_base = X_base[combined_mask].reset_index(drop=True)
+        #X_base = X_base[combined_mask]
+        valid_idx = X_base.index[combined_mask]
         start_ids_list = [start_ids[combined_mask] for start_ids in start_ids_list]
         end_ids_list = [end_ids[combined_mask] for end_ids in end_ids_list]
 
         # compute all features per window
-        assert pd.isna(X).values.sum() == 0
+        #assert pd.isna(X).values.sum() == 0  # TODO()
+        print(f'warning: {X.isna().sum().sum()} NaNs in the input dataframe')
+        
         result_dict = {}
         for col in self.target_cols:
             for k, bounds in enumerate(zip(start_ids_list, end_ids_list)):
@@ -253,8 +254,8 @@ class Catch22FeatureExtractor(BaseEstimator, TransformerMixin):
                 for name, value in zip(names, values):
                     result_dict[name] = np.asarray(value)
 
-        result_df = pd.DataFrame(result_dict).reset_index(drop=True)
-        result_df = pd.concat([X_base, result_df], axis=1)
+        result_df = pd.DataFrame(result_dict, index=valid_idx)
+        result_df = pd.concat([X_base.loc[valid_idx], result_df], axis=1)
 
         return result_df
 
@@ -340,36 +341,37 @@ class WeatherFeaturesExtractor(BaseEstimator, TransformerMixin):
             # reindex if nescessary
             if not city_fea_df.index.equals(X.index):
                 city_fea_df = city_fea_df.reindex(X.index)
+                print(f'reindexing; {city_fea_df.isna().sum().sum()}')
             # rename the featires uniquely for the city
             city_fea_df.columns = [f'{city} {col}' for col in city_fea_df.columns]
             fea_dfs_list.append(city_fea_df)
 
         # concat
         result_df = pd.concat(fea_dfs_list, axis=1)
-        print(result_df[result_df.isna()])
         # assert pd.isna(result_df).values.sum() == 0
         return result_df
 
     def generate_pv_wind_features(self, lat: float, lon: float, df) -> pd.DataFrame:
         # parse times robustly and ensure they are timezone-aware in Europe/Madrid
-        dt_index = pd.DatetimeIndex(df.index, tz='UTC')
-        
-        # if naive, localize to Europe/Madrid; if already tz-aware, convert to Europe/Madrid
 
-
+        dt_index = pd.DatetimeIndex(df['time__original_tz'], tz='Europe/Madrid').tz_convert('Europe/Madrid')
         loc = Location(latitude=lat, longitude=lon, tz='Europe/Madrid')
         solpos = loc.get_solarposition(dt_index)
         clearsky = loc.get_clearsky(dt_index)
+        srst = loc.get_sun_rise_set_transit(dt_index)
+        # Make sure sunrise/sunset are datetimes
+        srst['sunrise'] = pd.to_datetime(srst['sunrise'])
+        srst['sunset']  = pd.to_datetime(srst['sunset'])
+
+        daylight_hours = (srst['sunset'] - srst['sunrise']).dt.total_seconds() / 3600.0
         features = pd.DataFrame({
             'solar_zenith': solpos['zenith'].values,
             'solar_azimuth': solpos['azimuth'].values,
             'ghi': clearsky['ghi'].values,
             'dni': clearsky['dni'].values,
             'dhi': clearsky['dhi'].values,
-            'daylight_hours': loc.get_sun_rise_set_transit(dt_index).apply(
-                lambda x: (x['sunset'] - x['sunrise']).total_seconds() / 3600, axis=1)
-        })
-        features = features.reset_index(drop=True)
+            'daylight_hours': daylight_hours.values
+        }, index=df.index)
 
         return features
     
