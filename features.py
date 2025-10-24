@@ -1,11 +1,12 @@
 
 from __future__ import annotations
 from dataclasses import dataclass
-from typing import List, Dict
+from typing import List, Dict, Tuple
 from joblib import delayed, Parallel
 import pvlib
 from pvlib.location import Location
 import pycatch22
+# import tqdm
 
 import numpy as np
 import pandas as pd
@@ -18,21 +19,6 @@ def _cyclic_encode(series: pd.Series, period: int, prefix: str) -> pd.DataFrame:
         f"{prefix}_sin": np.sin(x),
         f"{prefix}_cos": np.cos(x),
     }, index=series.index)
-
-
-def _infer_energy_groups(columns: pd.Index) -> Dict[str, List[str]]:
-    renew_kw = ["solar", "wind", "hydro", "biomass", "geothermal", "renew"]
-    nonrenew_kw = ["coal", "gas", "oil", "nuclear", "lignite", "peat", "non_renew"]
-    usage_kw = ["load", "consumption", "demand", "usage"]
-
-    def match(keys):
-        return [c for c in columns if any(k in c.lower() for k in keys)]
-
-    return {
-        "renewable": match(renew_kw),
-        "non_renewable": match(nonrenew_kw),
-        "usage": match(usage_kw),
-    }
 
 
 def _rolling_features(x: pd.Series, window: int, prefix: str) -> pd.DataFrame:
@@ -83,29 +69,54 @@ def _catch22_features(x: pd.Series, window: int, prefix: str) -> pd.DataFrame:
 
 
 # features
-#
-#
+# 3x cyclic encoded time features
+# - weekday
+# - time of day
+# - day of year -> NOT every hour but only once in the prediction
 
-@dataclass
+# c22 weather features for previous day (pa2st 4 hours)
+
+# raw green percentage values for past N hours (control with N_future_values)
+
+# c22 weather features for next 24 hours
+
+### start prediction 2x a day from (local time) eg 8AM and again from eg 5 PM
+
 class FeatureExtraction(BaseEstimator, TransformerMixin):
-    N_past_values: int = 72
+    
+    def __init__(self, target_column:str, weather_columns: List[str], N_past_values: List[int] = [24, 7*24], N_future_values: int = 24,
+                 n_jobs: int = 4, add_raw_target = True, N_past_target_values: int = 24, verbose = 1) -> None:
 
-    def fit(self, X, y=None):
-        return self
+        self.target_column = target_column
+        self.verbose = verbose
+        self.weather_cols = weather_columns
+        self.N_past_target_values = N_past_target_values
+        self.weather_extractor = WeatherFeaturesExtractor()
+        self.add_raw_target = add_raw_target
+        # initialize with empty cols -> set before usage in transform
+        all_windows_past = [*N_past_values, 0]
+        all_windows_future = [*[0 for _ in N_past_values], N_future_values]
+        self.catch22_weather_extractor = Catch22FeatureExtractor(target_cols=weather_columns, windows_past_hrs=all_windows_past, 
+                                                                 windows_future_hrs=all_windows_future, njobs_default=n_jobs)
+    
+    
+    def fit(self, X: pd.DataFrame, y: pd.DataFrame = None) -> 'FeatureExtraction':
+        if (self.target_column is None) or (self.target_column not in X.columns):
+            raise ValueError("FeatureExtraction requires a target_column to be specified.")        
+        else:
+            return self
 
     def transform(self, X: pd.DataFrame) -> pd.DataFrame:
         if not isinstance(X, pd.DataFrame):
             raise TypeError("FeatureExtraction expects a pandas DataFrame.")
 
         df = X.copy()
+
+        # make sure the dataframe is sorted
+        # df = df.sort_values(by=['time'], ascending=True) # TODO!!
+
         if not isinstance(df.index, pd.DatetimeIndex):
             raise ValueError("FeatureExtraction requires a DatetimeIndex.")
-
-        groups = _infer_energy_groups(df.columns)
-        feats = {}
-        for name, cols in groups.items():
-            if cols:
-                feats[f"sum_{name}"] = df[cols].sum(axis=1)
 
         weekday = _cyclic_encode(pd.Series(df.index.weekday, index=df.index), 7, "weekday")
         minute_of_day = df.index.hour * 60 + df.index.minute
@@ -116,25 +127,60 @@ class FeatureExtraction(BaseEstimator, TransformerMixin):
 
         feature_frames = [weekday, time_of_day, day_of_year]
 
-        window = int(self.N_past_values)
-        target_cols = list(feats.keys())
-        energy_cols_all = set(sum(groups.values(), []))
-        weather_cols = [c for c in df.columns if c not in energy_cols_all]
-
-        for col in target_cols:
-            feature_frames.append(_catch22_features(feats[col], window, prefix=col))
-
-        for col in weather_cols:
-            if np.issubdtype(df[col].dtype, np.number):
-                feature_frames.append(_catch22_features(df[col], window, prefix=f"w_{col}"))
+        # compute the additional astronomical features
+        # sun_features = self.weather_extractor.transform(df)
+        # feature_frames.append(sun_features)        
 
         F = pd.concat(feature_frames, axis=1)
+        F = pd.concat([df, F], axis=1)
+
+        # compute the catch22 features and crop
+        if self.verbose:
+            print("Computing catch22 weather features...")
+        F = self.catch22_weather_extractor.transform(F)
+
+        # Add raw energy percentage columns
+        if self.add_raw_target:
+            # Add raw energy percentage columns (previous values)
+            # create N previous-hour columns named f"{target_column}_{i}" where
+            # i=0 corresponds to value at (current_time - N hours), i increases up to N-1 -> (current_time - 1 hour)
+            N = getattr(self, "N_future_windows", None)
+            if N is None:
+                # fallback to the configured past-target-window size if explicit future-windows wasn't stored
+                N = int(self.N_past_target_values)
+            else:
+                N = int(N)
+
+            # Use the original df target series, reindexed to the (possibly cropped) F index returned by catch22
+            orig_target = df[self.target_column].reindex(F.index)
+
+            for i in range(N):
+                # shift amount: i=0 -> shift N (value at t-N hours), i=N-1 -> shift 1 (value at t-1 hour)
+                shift_amount = N - i
+                col_name = f"{self.target_column}_{i}"
+                F[col_name] = orig_target.shift(shift_amount)
+            
         F = F.dropna(axis=1, how="all")
-
-        F.to_csv("features_extracted.csv")
-
+        
         return F
 
+
+class SaveORLoad(BaseEstimator, TransformerMixin):
+    def __init__(self, mode: str, data_path = '.\data', filename = 'features.csv') -> None:
+        self.data_path = data_path
+        self.filename = filename
+        self.mode = mode  # 'load' or 'save'
+    
+    def fit(self, X: pd.DataFrame, y: pd.DataFrame = None):
+        return self
+    
+    def transform(self, X: pd.DataFrame) -> pd.DataFrame:
+        if self.mode == 'load':
+            X = pd.read_csv(f"{self.data_path}/{self.filename}")
+            return X
+        elif self.mode == 'save':
+            X.to_csv(f"{self.data_path}/{self.filename}")
+            return X
 
 #####################
 
@@ -162,8 +208,8 @@ class Catch22FeatureExtractor(BaseEstimator, TransformerMixin):
 
         # sort X by time
         X = X.copy()
-        X['time'] = pd.to_datetime(X['time'])
-        X = X.sort_values('time', ascending=True)
+        # X['time'] = pd.to_datetime(X.index)
+        # X = X.sort_values('time', ascending=True)
         X = X.reset_index(drop=True)
 
         assert pd.isna(X[self.target_cols]).values.sum() == 0
@@ -176,8 +222,8 @@ class Catch22FeatureExtractor(BaseEstimator, TransformerMixin):
         njobs = self.njobs_default if njobs is None else njobs
 
         # extract the indices
-        src_time_col = X['time']
-        query_time_col = X_base['time']
+        src_time_col = X.index
+        query_time_col = X_base.index
         start_ids_list, end_ids_list, valid_mask_list = self._precompute_window_ids(src_time_col, query_time_col)
 
         # merge the mask and reducte the query
@@ -202,14 +248,12 @@ class Catch22FeatureExtractor(BaseEstimator, TransformerMixin):
                                         axis=1)
                 names = results_col[0]['names']
                 # rename
-                names = [f'catch22_{self.windows_past_hrs[k]}_{self.windows_future_hrs[k]}__{col} {name}' for name in
+                names = [f'catch22_{self.windows_past_hrs[k]}_{self.windows_future_hrs[k]}__{col}_{name}' for name in
                          names]
                 for name, value in zip(names, values):
                     result_dict[name] = np.asarray(value)
 
         result_df = pd.DataFrame(result_dict).reset_index(drop=True)
-
-        # join
         result_df = pd.concat([X_base, result_df], axis=1)
 
         return result_df
@@ -280,8 +324,8 @@ class WeatherFeaturesExtractor(BaseEstimator, TransformerMixin):
 
         X = X.copy()
         sun_features = self.compute_sun_features(X)
-        X = pd.concat([X, sun_features], axis=1)
-        return X
+        
+        return sun_features
 
     def fit_transform(self, X: pd.DataFrame, y: pd.DataFrame = None) -> pd.DataFrame:
         return self.fit(X, y).transform(X)
@@ -292,7 +336,7 @@ class WeatherFeaturesExtractor(BaseEstimator, TransformerMixin):
         for city in self.cities:
             city_lat, city_lon = self.city_lat_lon[city]
             # get the solar featiures
-            city_fea_df = self.generate_pv_wind_features(lat=city_lat, lon=city_lon, datetimes=pd.to_datetime(X['time'].copy()))
+            city_fea_df = self.generate_pv_wind_features(lat=city_lat, lon=city_lon, df=X)
             # reindex if nescessary
             if not city_fea_df.index.equals(X.index):
                 city_fea_df = city_fea_df.reindex(X.index)
@@ -302,11 +346,17 @@ class WeatherFeaturesExtractor(BaseEstimator, TransformerMixin):
 
         # concat
         result_df = pd.concat(fea_dfs_list, axis=1)
-        assert pd.isna(result_df).values.sum() == 0
+        print(result_df[result_df.isna()])
+        # assert pd.isna(result_df).values.sum() == 0
         return result_df
 
-    def generate_pv_wind_features(self, lat: float, lon: float, datetimes: pd.Series) -> pd.DataFrame:
-        dt_index = pd.DatetimeIndex(pd.to_datetime(datetimes)).tz_convert('Europe/Madrid')
+    def generate_pv_wind_features(self, lat: float, lon: float, df) -> pd.DataFrame:
+        # parse times robustly and ensure they are timezone-aware in Europe/Madrid
+        dt_index = pd.DatetimeIndex(df.index, tz='UTC')
+        
+        # if naive, localize to Europe/Madrid; if already tz-aware, convert to Europe/Madrid
+
+
         loc = Location(latitude=lat, longitude=lon, tz='Europe/Madrid')
         solpos = loc.get_solarposition(dt_index)
         clearsky = loc.get_clearsky(dt_index)

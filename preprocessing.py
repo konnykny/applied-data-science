@@ -201,13 +201,19 @@ class Preprocessing(BaseEstimator, TransformerMixin):
         # Drop tz info for downstream models (keep wall-clock correctness)
         if isinstance(df.index, pd.DatetimeIndex) and df.index.tz is not None:
             df.index = df.index.tz_localize(None)
+            
+        df = df.drop(columns=['time'])
+        
+        print(df.columns)
 
         gen_cols = [c for c in energy.columns if "generation" in c.lower()]
+        
         if gen_cols:
+            print("Processing generation columns for renewable/non-renewable totals...")
             lc = {c: c.lower() for c in gen_cols}
-            renewable_keywords = ("wind", "solar", "hydro", "geothermal", "biomass", "marine", "renewable")
-            nonrenewable_keywords = ("fossil", "coal", "gas", "oil", "peat", "nuclear")
-
+            renewable_keywords = ("wind", "solar", "hydro", "geothermal", "biomass", "marine", "renewable", "nuclear")
+            nonrenewable_keywords = ("fossil", "coal", "gas", "oil", "peat")
+            print(gen_cols)
             renew_cols = [c for c in gen_cols if any(k in lc[c] for k in renewable_keywords)]
             fossil_cols = [c for c in gen_cols if any(k in lc[c] for k in nonrenewable_keywords)]
 
@@ -216,6 +222,9 @@ class Preprocessing(BaseEstimator, TransformerMixin):
             if unmatched:
                 fossil_cols += unmatched
 
+            print(f"Identified renewable generation columns: {renew_cols}")
+            print(energy[renew_cols].sum(axis=1) if renew_cols else 0.0)
+            
             energy["total_renewable_generation"] = energy[renew_cols].sum(axis=1) if renew_cols else 0.0
             energy["total_fossil_generation"] = energy[fossil_cols].sum(axis=1) if fossil_cols else 0.0
 
@@ -229,6 +238,8 @@ class Preprocessing(BaseEstimator, TransformerMixin):
                 os.path.dirname(energy_path), "processed_dataframe.pkl"
             )
             try:
+                df.to_csv(pkl_path.replace(".pkl", ".csv"))
+                
                 with open(pkl_path, "wb") as f:
                     pickle.dump(df, f)
                 print(f"[Preprocessing] Saved processed dataframe to: {pkl_path}")
