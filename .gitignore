@@ -205,5 +205,7 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
-/.idea/applied-data-science.iml
-*.xml
+
+# Other
+data/.DS_Store
+data/spanish-cities-energy-consumption/energy_dataset.xlsx
