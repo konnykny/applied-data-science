@@ -152,15 +152,15 @@ class FeatureExtraction(BaseEstimator, TransformerMixin):
             # Use the original df target series, reindexed to the (possibly cropped) F index returned by catch22
             orig_target = df[self.target_column].reindex(F.index)
 
-            for i in range(N):
-                # shift amount: i=0 -> shift N (value at t-N hours), i=N-1 -> shift 1 (value at t-1 hour)
-                shift_amount = N - i
-                col_name = f"{self.target_column}_{i}"
-                F[col_name] = orig_target.shift(shift_amount)
+            for i in range(N):  # TODO() check
+               # shift amount: i=0 -> shift N (value at t-N hours), i=N-1 -> shift 1 (value at t-1 hour)
+               shift_amount = N - i
+               col_name = f"{self.target_column}_{i}"
+               F[col_name] = orig_target.shift(shift_amount)
         F = F.dropna(axis=1, how="all")
-        #for col in F.columns:
-        #    print(f'{col} -> {F[col].isna().sum()}')
-
+        for col in F.columns:
+            print(f'{col} -> {F[col].isna().sum()}')
+        print('feature processing done')
         return F
 
 

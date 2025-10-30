@@ -33,13 +33,13 @@ def build_pipeline(data_dir_or_paths, ffill_amt=3, sampling_interval=1, drop_na=
             weather_columns=['temp', 'temp_max'], 
         )),
         ("save_features", SaveORLoad(mode='save')),
-        # # ("save_features", SaveORLoad(mode='load')),
-        # ("#4 Train Models", ModelTraining(
-        #     target_column=target_column,
-        #     test_size=test_size,
-        #     random_state=random_state,
-        #     plot_results=plot_results
-        # ))
+        #("save_features", SaveORLoad(mode='load')),
+        ("#4 Train Models", ModelTraining(
+            target_column=target_column,
+            test_size=test_size,
+            random_state=random_state,
+            plot_results=plot_results
+        ))
     ])
     return pipe
 
@@ -47,7 +47,7 @@ def build_pipeline(data_dir_or_paths, ffill_amt=3, sampling_interval=1, drop_na=
 if __name__ == "__main__":
     data_dir = './data'#os.environ.get("DATA_DIR", ".")
 
-    target_col = 'total load actual'
+    target_col = 'renewable_generation_ratio'
 
     pipeline = build_pipeline(
         data_dir_or_paths=data_dir,

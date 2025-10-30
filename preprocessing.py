@@ -204,15 +204,13 @@ class Preprocessing(BaseEstimator, TransformerMixin):
             
         df = df.drop(columns=['time'])
         
-        print(df.columns)
-
-        gen_cols = [c for c in energy.columns if "generation" in c.lower()]
+        gen_cols = [c for c in df.columns if "generation" in c.lower()]
         
         if gen_cols:
             print("Processing generation columns for renewable/non-renewable totals...")
             lc = {c: c.lower() for c in gen_cols}
             renewable_keywords = ("wind", "solar", "hydro", "geothermal", "biomass", "marine", "renewable", "nuclear")
-            nonrenewable_keywords = ("fossil", "coal", "gas", "oil", "peat")
+            nonrenewable_keywords = ("fossil", "coal", "gas", "oil", "peat", "waste")
             print(gen_cols)
             renew_cols = [c for c in gen_cols if any(k in lc[c] for k in renewable_keywords)]
             fossil_cols = [c for c in gen_cols if any(k in lc[c] for k in nonrenewable_keywords)]
@@ -223,15 +221,15 @@ class Preprocessing(BaseEstimator, TransformerMixin):
                 fossil_cols += unmatched
 
             print(f"Identified renewable generation columns: {renew_cols}")
-            print(energy[renew_cols].sum(axis=1) if renew_cols else 0.0)
+            print(df[renew_cols].sum(axis=1) if renew_cols else 0.0)
             
-            energy["total_renewable_generation"] = energy[renew_cols].sum(axis=1) if renew_cols else 0.0
-            energy["total_fossil_generation"] = energy[fossil_cols].sum(axis=1) if fossil_cols else 0.0
+            df["total_renewable_generation"] = df[renew_cols].sum(axis=1) if renew_cols else 0.0
+            df["total_fossil_generation"] = df[fossil_cols].sum(axis=1) if fossil_cols else 0.0
+            df["renewable_generation_ratio"] = df["total_renewable_generation"] / (df["total_renewable_generation"] + df["total_fossil_generation"])
 
             # remove the original detailed generation columns
             if self.drop_energy_details:
-                energy = energy.drop(columns=gen_cols)
-
+                df = df.drop(columns=gen_cols)
 
         if self.save_pickle:
             pkl_path = self.load_pickle_instead or os.path.join(
@@ -245,5 +243,9 @@ class Preprocessing(BaseEstimator, TransformerMixin):
                 print(f"[Preprocessing] Saved processed dataframe to: {pkl_path}")
             except Exception as e:
                 print(f"[Preprocessing] Could not save pickle ({e}). Skipping.")
+
+        print('cols after preprocessing')
+        for col in df.columns:
+            print(col)
 
         return df
