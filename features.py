@@ -6,6 +6,8 @@ from joblib import delayed, Parallel
 import pvlib
 from pvlib.location import Location
 import pycatch22
+import os.path as osp
+import pickle
 # import tqdm
 
 import numpy as np
@@ -83,11 +85,14 @@ def _catch22_features(x: pd.Series, window: int, prefix: str) -> pd.DataFrame:
 ### start prediction 2x a day from (local time) eg 8AM and again from eg 5 PM
 
 class FeatureExtraction(BaseEstimator, TransformerMixin):
+
+    file_path: str = './features_dataframe.pkl'
     
     def __init__(self, target_column:str, weather_columns: List[str], N_past_values: List[int] = [24, 7*24], N_future_values: int = 24,
-                 n_jobs: int = 16, add_raw_target = True, N_past_target_values: int = 24, verbose = 1) -> None:
+                 n_jobs: int = 16, add_raw_target = True, N_past_target_values: int = 24, verbose = 1, use_pickle: bool = True) -> None:
 
         self.target_column = target_column
+        self.use_pickle = use_pickle
         self.verbose = verbose
         self.weather_cols = weather_columns
         self.N_past_target_values = N_past_target_values
@@ -109,6 +114,12 @@ class FeatureExtraction(BaseEstimator, TransformerMixin):
     def transform(self, X: pd.DataFrame) -> pd.DataFrame:
         if not isinstance(X, pd.DataFrame):
             raise TypeError("FeatureExtraction expects a pandas DataFrame.")
+
+        if self.use_pickle and osp.isfile(self.file_path):
+            with open(self.file_path, 'rb') as f:
+                F = pickle.load(f)
+            print(f'[feature extraction] Loading Preprocessed features from pickle: {self.file_path}')
+            return F
 
         df = X.copy()
 
@@ -152,7 +163,7 @@ class FeatureExtraction(BaseEstimator, TransformerMixin):
             # Use the original df target series, reindexed to the (possibly cropped) F index returned by catch22
             orig_target = df[self.target_column].reindex(F.index)
 
-            for i in range(N):  # TODO() check
+            for i in range(24, 48):  # TODO() check
                # shift amount: i=0 -> shift N (value at t-N hours), i=N-1 -> shift 1 (value at t-1 hour)
                shift_amount = N - i
                col_name = f"{self.target_column}_{i}"
@@ -160,7 +171,14 @@ class FeatureExtraction(BaseEstimator, TransformerMixin):
         F = F.dropna(axis=1, how="all")
         for col in F.columns:
             print(f'{col} -> {F[col].isna().sum()}')
-        print('feature processing done')
+        print('[feature extraction] Done')
+
+        if self.use_pickle:
+            print(f'[feature extraction] Saving features to: {self.file_path}')
+            with open(self.file_path, 'wb') as f:
+                pickle.dump(F, f)
+            F.to_csv(self.file_path.replace('pkl', 'csv'))
+
         return F
 
 
