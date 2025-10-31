@@ -17,7 +17,7 @@ def build_pipeline(data_dir_or_paths, target_column=None):
             drop_na = False,
             load_pickle_instead = None, #f'{data_dir}\preprocessed_dataframe.pkl',
             save_pickle = True,
-            drop_energy_details = False,
+            drop_energy_details = True,
         )),
         # ("#2 Explore", Exploration(
         #     nan_report = True,
