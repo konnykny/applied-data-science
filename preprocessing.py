@@ -138,16 +138,17 @@ class Preprocessing(BaseEstimator, TransformerMixin):
         if not os.path.exists(energy_path) or not os.path.exists(weather_path):
             raise FileNotFoundError(f"Could not find CSVs. energy: {energy_path}, weather: {weather_path}")
 
-
         energy = _load_csv(energy_path)
         weather = _load_csv(weather_path)
 
         # Drop useless cols from energy
-        drop_energy_cols = ["generation hydro pumped storage aggregated", "forecast wind offshore eday ahead",
+        drop_energy_cols = ["generation hydro pumped storage aggregated",
                             "generation fossil coal-derived gas", "generation fossil oil shale",
                             "generation fossil peat", "generation geothermal", "generation marine",
-                            "generation wind offshore"]
+                            "generation wind offshore", "forecast wind onshore day ahead", "forecast solar day ahead"]
         energy = energy.drop(columns=[c for c in drop_energy_cols if c in energy.columns])
+
+        print(energy.columns)
 
         # Pivot weather by location if 'city_name' is present
         loc_candidates = ["city_name"]
@@ -174,6 +175,10 @@ class Preprocessing(BaseEstimator, TransformerMixin):
         if not weather.index.is_unique:
             weather = weather.groupby(weather.index).mean()
 
+        # Drop weather cols if present
+        drop_cols = ["weather_id", "weather_main", "weather_description", "weather_icon", "rain_3h", "snow_3h"]
+        weather = weather.drop(columns=[c for c in drop_cols if c in weather.columns])
+
         # *** NO REINDEXING, NO INTERPOLATION ***
         # Align to the true intersection of timestamps
         common_idx = energy.index.intersection(weather.index).sort_values()
@@ -182,11 +187,6 @@ class Preprocessing(BaseEstimator, TransformerMixin):
 
         # Merge (inner join is redundant now but explicit)
         df = energy.join(weather, how="inner", rsuffix="_weather")
-
-
-        # Drop weather cols if present
-        drop_cols = ["weather_id", "weather_main", "weather_description", "weather_icon", "rain_3h", "snow_3h"]
-        weather = weather.drop(columns=[c for c in drop_cols if c in weather.columns])
 
         # Can patch small gaps
         if self.ffill_amt not in (None, 0):
@@ -198,7 +198,7 @@ class Preprocessing(BaseEstimator, TransformerMixin):
         if self.drop_na:
             df = df.dropna(axis=0, how="any")
 
-        # Drop tz info for downstream models (keep wall-clock correctness)
+        # Drop tz info for downstream models (keep local time correctness)
         if isinstance(df.index, pd.DatetimeIndex) and df.index.tz is not None:
             df.index = df.index.tz_localize(None)
             
@@ -247,5 +247,7 @@ class Preprocessing(BaseEstimator, TransformerMixin):
         print('cols after preprocessing')
         for col in df.columns:
             print(col)
+
+
 
         return df
