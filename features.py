@@ -85,13 +85,13 @@ def _catch22_features(x: pd.Series, window: int, prefix: str) -> pd.DataFrame:
 class FeatureExtraction(BaseEstimator, TransformerMixin):
     
     def __init__(self, target_column:str, weather_columns: List[str], N_past_values: List[int] = [24, 7*24], N_future_values: int = 24,
-                 n_jobs: int = 16, add_raw_target = True, N_past_target_values: int = 24, verbose = 1) -> None:
+                 n_jobs: int = 16, add_raw_target = True, N_past_target_values: int = 24, generated_locations=['Madrid'], verbose = 1) -> None:
 
         self.target_column = target_column
         self.verbose = verbose
         self.weather_cols = weather_columns
         self.N_past_target_values = N_past_target_values
-        self.weather_extractor = WeatherFeaturesExtractor()
+        self.weather_extractor = WeatherFeaturesExtractor(cities=generated_locations)
         self.add_raw_target = add_raw_target
         # initialize with empty cols -> set before usage in transform
         all_windows_past = [*N_past_values, 0]
@@ -123,7 +123,7 @@ class FeatureExtraction(BaseEstimator, TransformerMixin):
         time_of_day = _cyclic_encode(pd.Series(minute_of_day, index=df.index), 24 * 60, "tod")
         day_of_year = _cyclic_encode(pd.Series(df.index.dayofyear, index=df.index), 366, "doy")
 
-        # TODO add one-hot encoding for holidays/vacations
+        # TODO add one-hot encoding for holidays/vacations ? -> suggest for future work
 
         feature_frames = [weekday, time_of_day, day_of_year]
 
@@ -192,7 +192,7 @@ class Catch22FeatureExtractor(BaseEstimator, TransformerMixin):
         for k_p, k_f in zip(windows_past_hrs, windows_future_hrs):
             assert k_p + k_f >= 3
 
-        self.target_cols = target_cols
+        self.target_cols = target_cols # list of columns to extract features from
         self.njobs_default = njobs_default
 
         # incides to crop the merged dataframe
