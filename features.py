@@ -85,10 +85,9 @@ def _catch22_features(x: pd.Series, window: int, prefix: str) -> pd.DataFrame:
 class FeatureExtraction(BaseEstimator, TransformerMixin):
     
     def __init__(self, target_column:str, weather_columns: List[str], N_past_values: List[int] = [24, 7*24], N_future_values: int = 24,
-                 n_jobs: int = 16, add_raw_target = True, N_past_target_values: int = 24, generated_locations=['Madrid'], verbose = 1) -> None:
+                 n_jobs: int = 16, add_raw_target = True, N_past_target_values: int = 24, generated_locations=['Madrid']) -> None:
 
         self.target_column = target_column
-        self.verbose = verbose
         self.weather_cols = weather_columns
         self.N_past_target_values = N_past_target_values
         self.weather_extractor = WeatherFeaturesExtractor(cities=generated_locations)
@@ -134,8 +133,7 @@ class FeatureExtraction(BaseEstimator, TransformerMixin):
         F = pd.concat(feature_frames, axis=1)
         F = pd.concat([df, F], axis=1)
         # compute the catch22 features and crop
-        if self.verbose:
-            print("Computing catch22 weather features...")
+        print("Computing catch22 weather features...")
         F = self.catch22_weather_extractor.transform(F)
         # Add raw energy percentage columns
         if self.add_raw_target:
@@ -152,7 +150,8 @@ class FeatureExtraction(BaseEstimator, TransformerMixin):
             # Use the original df target series, reindexed to the (possibly cropped) F index returned by catch22
             orig_target = df[self.target_column].reindex(F.index)
 
-            for i in range(N):  # TODO() check
+            # shift for window size and drop nans
+            for i in range(N):
                # shift amount: i=0 -> shift N (value at t-N hours), i=N-1 -> shift 1 (value at t-1 hour)
                shift_amount = N - i
                col_name = f"{self.target_column}_{i}"
@@ -162,6 +161,8 @@ class FeatureExtraction(BaseEstimator, TransformerMixin):
             print(f'{col} -> {F[col].isna().sum()}')
         print('feature processing done')
         return F
+
+
 
 
 class SaveORLoad(BaseEstimator, TransformerMixin):

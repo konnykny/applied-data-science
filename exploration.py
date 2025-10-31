@@ -30,6 +30,14 @@ class Exploration(BaseEstimator, TransformerMixin):
     def transform(self, X):
         if not isinstance(X, pd.DataFrame):
             raise TypeError("Exploration expects a pandas DataFrame.")
+
+        # print basic info (columns, first few rows)
+        print("\n[Exploration] DataFrame info:")
+        print(X.info())
+        print("\n[Exploration] First few rows:")
+        print(X.head().to_string())
+
+
         if self.nan_report:
             na_pct = X.isna().mean().loc[lambda s: s.gt(0)].sort_values(ascending=False) * 100.0
             if not na_pct.empty:
@@ -55,6 +63,8 @@ class Exploration(BaseEstimator, TransformerMixin):
                     print(f" - {c}")
             else:
                 print("\n[Exploration] No all-zero columns found.")
+
+
 
 
         if self.plot_data is not None:

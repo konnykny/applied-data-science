@@ -13,12 +13,11 @@ from sklearn.ensemble import RandomForestRegressor
 from sklearn.metrics import mean_absolute_error, root_mean_squared_error, r2_score
 
 X_forbidden_cols = [
-    # 'total load actual',
-    # 'price actual',
-    # 'price day ahead',
-    # 'total load forecast',
-    # 'forecast wind onshore day ahead',
-    # 'forecast solar day ahead',
+    'total load actual',
+    'price actual',
+    'price day ahead',
+    'total load forecast',
+
     # 'generation wind onshore',
     # 'generation waste',
     #
@@ -37,7 +36,9 @@ X_forbidden_cols = [
 
     'total_fossil_generation',
     'total_renewable_generation',
-    'renewable_generation_ratio'
+    'renewable_generation_ratio',
+
+    'time__original_tz',
 ]
 
 import xgboost as xgb
@@ -110,13 +111,14 @@ class ModelTraining(BaseEstimator, RegressorMixin):
                 subsample=0.8, colsample_bytree=0.8, reg_lambda=1.0,
                 random_state=self.random_state, n_jobs=-1, verbose=2),
             "LinearRegression": LinearRegression(),
-            "RandomForest": RandomForestRegressor(n_estimators=300, random_state=self.random_state, n_jobs=-1),
+            # "RandomForest": RandomForestRegressor(n_estimators=300, random_state=self.random_state, n_jobs=-1),
         }
 
         print(f'target col: {self.target_column}')
         print(f'traning cols ({len(X.columns)})')
-        for col in X.columns:
-            print(f'   {col} ({X[col].dtype})-> {X[col].isna().sum()}')
+        # for col in X.columns:
+        #     print(f'   {col} ({X[col].dtype})-> {X[col].isna().sum()}')
+        print(X.info())
 
         scores = {}
         fitted = {}
@@ -129,6 +131,9 @@ class ModelTraining(BaseEstimator, RegressorMixin):
             scores[name] = {"R2": r2, "MAE": mae, "RMSE": rmse}
             fitted[name] = model
             print(f"[ModelTraining] {name}: R2={r2:.4f}  MAE={mae:.4f}  RMSE={rmse:.4f}")
+            if name == 'XGBoost':
+                xgb.plot_importance(model)
+                plt.show()
 
         best_name = min(scores, key=lambda k: scores[k]["RMSE"]) 
         self.best_estimator_ = fitted[best_name]
