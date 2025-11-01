@@ -20,8 +20,8 @@ def build_pipeline(data_dir_or_paths, target_column=None):
             drop_energy_details = True,
         )),
         ("#2 Explore", Exploration(
-            nan_report = True,
-            plot_data = None, # "All" | "weather" | "energy" | None | "seaborn"
+            nan_report=True,
+            plot_data=None,  # "All" | "weather" | "energy" | None | "seaborn"
         )),
         # ("#3 Calculate features", FeatureExtraction(
         #     target_column,
@@ -30,6 +30,11 @@ def build_pipeline(data_dir_or_paths, target_column=None):
         #     N_past_target_values=24,
         #     weather_columns= ['temp', 'wind_speed', 'clouds_all', 'rain_1h'],
         #     generated_locations = ['madrid'], # choose city locations for feature generation (zenith, azimuth, etc.)
+        #     future_weather_prediction_columns = ['temp', 'wind_speed', 'clouds_all', 'rain_1h'],
+        # )),
+        # ("#3.5 Explore", Exploration(
+        #     nan_report=True,
+        #     plot_data=None,  # "All" | "weather" | "energy" | None | "seaborn"
         # )),
         # ("save_features", SaveORLoad(mode='save')),
         # #("save_features", SaveORLoad(mode='load')),

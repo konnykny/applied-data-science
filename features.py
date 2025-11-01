@@ -1,4 +1,3 @@
-
 from __future__ import annotations
 from dataclasses import dataclass
 from typing import List, Dict, Tuple
@@ -83,37 +82,71 @@ def _catch22_features(x: pd.Series, window: int, prefix: str) -> pd.DataFrame:
 ### start prediction 2x a day from (local time) eg 8AM and again from eg 5 PM
 
 class FeatureExtraction(BaseEstimator, TransformerMixin):
-    
-    def __init__(self, target_column:str, weather_columns: List[str], N_past_values: List[int] = [24, 7*24], N_future_values: int = 24,
-                 n_jobs: int = 16, add_raw_target = True, N_past_target_values: int = 24, generated_locations=['Madrid']) -> None:
+    def __init__(self,
+                 target_column: str,
+                 weather_columns: List[str],
+                 N_past_values: List[int] = [24, 7*24],
+                 N_future_values: int = 24,
+                 n_jobs: int = 16,
+                 add_raw_target = True,
+                 N_past_target_values: int = 24,
+                 generated_locations=['madrid'],
+                 future_weather_prediction_columns: List[str] = None) -> None:
 
         self.target_column = target_column
         self.weather_cols = weather_columns
         self.N_past_target_values = N_past_target_values
+        self.N_future_values = int(N_future_values)
+        self.future_weather_prediction_columns = future_weather_prediction_columns or []
         self.weather_extractor = WeatherFeaturesExtractor(cities=generated_locations)
         self.add_raw_target = add_raw_target
         # initialize with empty cols -> set before usage in transform
         all_windows_past = [*N_past_values, 0]
-        all_windows_future = [*[0 for _ in N_past_values], N_future_values]
-        self.catch22_weather_extractor = Catch22FeatureExtractor(target_cols=weather_columns, windows_past_hrs=all_windows_past, 
-                                                                 windows_future_hrs=all_windows_future, njobs_default=n_jobs)
-    
-    
+        all_windows_future = [*[0 for _ in N_past_values], self.N_future_values]
+        self.catch22_weather_extractor = Catch22FeatureExtractor(
+            target_cols=weather_columns,
+            windows_past_hrs=all_windows_past,
+            windows_future_hrs=all_windows_future,
+            njobs_default=n_jobs
+        )
+
+    # This function sucks, sorry
+    # should add future weather cols
+    def _add_future_values_from_columns(self, F: pd.DataFrame, src_df: pd.DataFrame,
+                                        src_columns: List[str]) -> pd.DataFrame:
+        if not src_columns:
+            return F
+        for col in src_columns:
+            if col not in src_df.columns:
+                for i in range(self.N_future_values):
+                    F[f"future_{col}_f{i}"] = np.nan
+                continue
+            # shift on full series, then reindex to F to avoid edge NaNs
+            full_series = src_df[col]
+            for i in range(self.N_future_values):
+                col_name = f"future_{col}_f{i}"
+                shifted = full_series.shift(-(i + 1))  # t+1..t+N
+                F[col_name] = shifted.reindex(F.index)
+        return F
+
+
+    # TODO!! feel free to implement
+    def shift_to_daily_rows(self, df: pd.DataFrame, prediction_hour_utc: int = 8) -> pd.DataFrame:
+        # Do groupby/resample to day, but keep individual 24 hrs of each feature in the same row,
+        # and name column according to starting time at 'prediction_hour_utc' e.g. 8 for 8AM UTC
+        #
+        #
+
+        pass
+
     def fit(self, X: pd.DataFrame, y: pd.DataFrame = None) -> 'FeatureExtraction':
         if (self.target_column is None) or (self.target_column not in X.columns):
-            raise ValueError("FeatureExtraction requires a target_column to be specified.")        
+            raise ValueError("FeatureExtraction requires a target_column to be specified.")
         else:
             return self
 
     def transform(self, X: pd.DataFrame) -> pd.DataFrame:
-        if not isinstance(X, pd.DataFrame):
-            raise TypeError("FeatureExtraction expects a pandas DataFrame.")
-
         df = X.copy()
-
-        # make sure the dataframe is sorted
-        # df = df.sort_values(by=['time'], ascending=True) # TODO!!
-
         if not isinstance(df.index, pd.DatetimeIndex):
             raise ValueError("FeatureExtraction requires a DatetimeIndex.")
 
@@ -122,46 +155,28 @@ class FeatureExtraction(BaseEstimator, TransformerMixin):
         time_of_day = _cyclic_encode(pd.Series(minute_of_day, index=df.index), 24 * 60, "tod")
         day_of_year = _cyclic_encode(pd.Series(df.index.dayofyear, index=df.index), 366, "doy")
 
-        # TODO add one-hot encoding for holidays/vacations ? -> suggest for future work
-
-        feature_frames = [weekday, time_of_day, day_of_year]
-
-        # compute the additional astronomical features
         sun_features = self.weather_extractor.transform(df)
-        feature_frames.append(sun_features)        
-        print(f'sun feas: {sun_features.shape}, {sun_features.isna().sum().sum()}')
-        F = pd.concat(feature_frames, axis=1)
+
+        F = pd.concat([weekday, time_of_day, day_of_year, sun_features], axis=1)
         F = pd.concat([df, F], axis=1)
-        # compute the catch22 features and crop
-        print("Computing catch22 weather features...")
         F = self.catch22_weather_extractor.transform(F)
-        # Add raw energy percentage columns
+
         if self.add_raw_target:
-            # Add raw energy percentage columns (previous values)
-            # create N previous-hour columns named f"{target_column}_{i}" where
-            # i=0 corresponds to value at (current_time - N hours), i increases up to N-1 -> (current_time - 1 hour)
-            N = getattr(self, "N_future_windows", None)
-            if N is None:
-                # fallback to the configured past-target-window size if explicit future-windows wasn't stored
-                N = int(self.N_past_target_values)
-            else:
-                N = int(N)
+            past_N = int(self.N_past_target_values)
+            for i in range(past_N):
+                shift_amount = past_N - i  # positive -> past
+                col_name = f"past_{self.target_column}_{i}"
+                # shift on full series, then reindex to F to avoid head NaNs
+                F[col_name] = df[self.target_column].shift(shift_amount).reindex(F.index)
 
-            # Use the original df target series, reindexed to the (possibly cropped) F index returned by catch22
-            orig_target = df[self.target_column].reindex(F.index)
+            F = self._add_future_values_from_columns(F, df, self.future_weather_prediction_columns)
 
-            # shift for window size and drop nans
-            for i in range(N):
-               # shift amount: i=0 -> shift N (value at t-N hours), i=N-1 -> shift 1 (value at t-1 hour)
-               shift_amount = N - i
-               col_name = f"{self.target_column}_{i}"
-               F[col_name] = orig_target.shift(shift_amount)
-        F = F.dropna(axis=1, how="all")
-        for col in F.columns:
-            print(f'{col} -> {F[col].isna().sum()}')
-        print('feature processing done')
+        F = F.dropna(axis=1, how="all")  # drop all-NaN columns
+
+        # if you require rows with no NaNs at all:
+        # F = F.dropna(axis=0, how="any")
+
         return F
-
 
 
 
@@ -205,58 +220,59 @@ class Catch22FeatureExtractor(BaseEstimator, TransformerMixin):
         return self
 
     def transform(self, X: pd.DataFrame, njobs: int = None) -> pd.DataFrame:
-
-        # sort X by time
-        X = X.copy(deep=True)
-        X = X.sort_index(ascending=True)
-
+        X = X.copy(deep=True).sort_index(ascending=True)
         assert pd.isna(X[self.target_cols]).values.sum() == 0
 
-        # crop the base X dataframe to fit the extracted features
         start_idx = np.max(self.windows_past_hrs)
         end_idx = X.shape[0] - np.max(self.windows_future_hrs) - 1
-        X_base = X.copy().iloc[start_idx: end_idx + 1]
+        X_base = X.iloc[start_idx: end_idx + 1]
 
         njobs = self.njobs_default if njobs is None else njobs
 
-        # extract the indices
         src_time_col = pd.to_datetime(X.index)
         query_time_col = pd.to_datetime(X_base.index)
         start_ids_list, end_ids_list, valid_mask_list = self._precompute_window_ids(src_time_col, query_time_col)
 
-        # merge the mask and reducte the query
-        combined_mask = valid_mask_list[0]
+        combined_mask = valid_mask_list[0].copy()
         for mask in valid_mask_list[1:]:
             combined_mask &= mask
-        assert combined_mask.all()
 
-        #X_base = X_base[combined_mask]
+        if not combined_mask.any():
+            raise ValueError("No valid query indices for the configured past/future windows.")
+        # drop invalid rows
         valid_idx = X_base.index[combined_mask]
-        start_ids_list = [start_ids[combined_mask] for start_ids in start_ids_list]
-        end_ids_list = [end_ids[combined_mask] for end_ids in end_ids_list]
+        start_ids_list = [arr[combined_mask] for arr in start_ids_list]
+        end_ids_list = [arr[combined_mask] for arr in end_ids_list]
 
-        # compute all features per window
-        #assert pd.isna(X).values.sum() == 0  # TODO()
-        print(f'warning: {X.isna().sum().sum()} NaNs in the input dataframe')
-        
+        assert pd.isna(X).values.sum() == 0
+
         result_dict = {}
         for col in self.target_cols:
-            for k, bounds in enumerate(zip(start_ids_list, end_ids_list)):
-                start_ids, end_ids = bounds
+            for k, (start_ids, end_ids) in enumerate(zip(start_ids_list, end_ids_list)):
                 results_col = Parallel(n_jobs=njobs)(
-                    delayed(pycatch22.catch22_all)(X[col].iloc[start_ids[i]:end_ids[i] + 1], catch24=True) for i in
-                    range(start_ids.shape[0]))
-                values = np.concatenate([np.asarray(v['values'], dtype=float).reshape(-1, 1) for v in results_col],
-                                        axis=1)
-                names = results_col[0]['names']
-                # rename
-                names = [f'catch22_{self.windows_past_hrs[k]}_{self.windows_future_hrs[k]}__{col}_{name}' for name in
-                         names]
+                    delayed(pycatch22.catch22_all)(
+                        X[col].iloc[start_ids[i]:end_ids[i] + 1], catch24=False,  # TODO CHECK IMPACT
+                            short_names=True, )
+                    for i in range(start_ids.shape[0])
+                )
+                values = np.concatenate(
+                    [np.asarray(v['values'], dtype=float).reshape(-1, 1) for v in results_col],
+                    axis=1
+                )
+                names = [
+                    f'catch22_{self.windows_past_hrs[k]}_{self.windows_future_hrs[k]}__{col}_{name}'
+                    for name in results_col[0]['names']
+                ]
                 for name, value in zip(names, values):
                     result_dict[name] = np.asarray(value)
 
+
+
         result_df = pd.DataFrame(result_dict, index=valid_idx)
         result_df = pd.concat([X_base.loc[valid_idx], result_df], axis=1)
+
+        # Replace all NaNs with 0
+        result_df = result_df.fillna(0)
 
         return result_df
 
@@ -375,5 +391,4 @@ class WeatherFeaturesExtractor(BaseEstimator, TransformerMixin):
         }, index=df.index)
 
         return features
-    
-    
+

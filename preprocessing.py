@@ -221,7 +221,7 @@ class Preprocessing(BaseEstimator, TransformerMixin):
                 fossil_cols += unmatched
 
             print(f"Identified renewable generation columns: {renew_cols}")
-            print(df[renew_cols].sum(axis=1) if renew_cols else 0.0)
+            # print(df[renew_cols].sum(axis=1) if renew_cols else 0.0)
             
             df["total_renewable_generation"] = df[renew_cols].sum(axis=1) if renew_cols else 0.0
             df["total_fossil_generation"] = df[fossil_cols].sum(axis=1) if fossil_cols else 0.0
@@ -244,10 +244,8 @@ class Preprocessing(BaseEstimator, TransformerMixin):
             except Exception as e:
                 print(f"[Preprocessing] Could not save pickle ({e}). Skipping.")
 
-        print('cols after preprocessing')
-        for col in df.columns:
-            print(col)
-
-
+        # print('cols after preprocessing')
+        # for col in df.columns:
+        #     print(col)
 
         return df
