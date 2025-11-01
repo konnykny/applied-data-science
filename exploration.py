@@ -11,16 +11,7 @@ from sklearn.base import BaseEstimator, TransformerMixin
 
 @dataclass
 class Exploration(BaseEstimator, TransformerMixin):
-    """
-    Light EDA within a pipeline. Returns the input DataFrame unchanged.
-    Parameters
-    ----------
-    nan_report : bool
-        If True, prints % missing per column (only those with missing).
-    plot_data : str
-        'All' | 'weather' | 'energy' | 'seaborn' | None. If set, produces time-series plots.
-        'seaborne' is accepted and treated as 'seaborn'.
-    """
+
     nan_report: bool = True
     plot_data: Optional[str] = "All"
 

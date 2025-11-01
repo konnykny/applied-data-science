@@ -69,28 +69,7 @@ def _flatten_columns(cols: pd.MultiIndex) -> List[str]:
 
 @dataclass
 class Preprocessing(BaseEstimator, TransformerMixin):
-    """
-    Load, merge, clean, and optionally pickle intermediate dataframe.
-    Compatible with scikit-learn pipelines.
 
-    Parameters
-    ----------
-    data_path : Union[str, Dict[str, str]]
-        Directory with the two CSVs or dict {'energy': path, 'weather': path}.
-    ffill_amt : Optional[int]
-        Forward-fill limit (consecutive NaNs to fill). 0/None disables ffill.
-    sampling_interval : int
-        Sampling in hours. 1 means hourly.
-    drop_na : bool
-        Drop rows with any NaNs after filling/resampling.
-    load_pickle_instead : Optional[str]
-        If provided and exists, load that pickle and skip processing.
-    save_pickle : bool
-        Save processed dataframe next to energy file (or to provided pickle path).
-    max_interp_hours : int
-        Only interpolate *inside* gaps up to this many hours; larger gaps stay NaN
-        to avoid deceptive long ramps across missing chunks.
-    """
     data_path: Union[str, Dict[str, str]]
     ffill_amt: Optional[int] = 3
     sampling_interval: int = 1
@@ -100,6 +79,7 @@ class Preprocessing(BaseEstimator, TransformerMixin):
     max_interp_hours: int = 6  # conservative default
     average_weather_data: bool = True
     drop_energy_details: bool = True
+    verbose: int = 0
 
     def __post_init__(self):
         if isinstance(self.data_path, dict):
@@ -148,7 +128,9 @@ class Preprocessing(BaseEstimator, TransformerMixin):
                             "generation wind offshore", "forecast wind onshore day ahead", "forecast solar day ahead"]
         energy = energy.drop(columns=[c for c in drop_energy_cols if c in energy.columns])
 
-        print(energy.columns)
+        if self.verbose:
+            print("Energy columns before processing:")
+            print(energy.columns)
 
         # Pivot weather by location if 'city_name' is present
         loc_candidates = ["city_name"]

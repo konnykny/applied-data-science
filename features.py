@@ -134,7 +134,7 @@ class FeatureExtraction(BaseEstimator, TransformerMixin):
             # shift on full series, then reindex to F to avoid edge NaNs
             full_series = src_df[col]
             for i in range(self.N_future_values):
-                col_name = f"future_{col}_f{i}"
+                col_name = f"future_{col}_{i}"
                 shifted = full_series.shift(-(i + 1))  # t+1..t+N
                 F[col_name] = shifted.reindex(F.index)
         return F

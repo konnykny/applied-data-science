@@ -23,27 +23,27 @@ def build_pipeline(data_dir_or_paths, target_column=None):
             nan_report=True,
             plot_data=None,  # "All" | "weather" | "energy" | None | "seaborn"
         )),
-        # ("#3 Calculate features", FeatureExtraction(
-        #     target_column,
-        #     N_past_values= [24, 24*7],
-        #     N_future_values= 24,
-        #     N_past_target_values=24,
-        #     weather_columns= ['temp', 'wind_speed', 'clouds_all', 'rain_1h'],
-        #     generated_locations = ['madrid'], # choose city locations for feature generation (zenith, azimuth, etc.)
-        #     future_weather_prediction_columns = ['temp', 'wind_speed', 'clouds_all', 'rain_1h'],
-        # )),
-        # ("#3.5 Explore", Exploration(
-        #     nan_report=True,
-        #     plot_data=None,  # "All" | "weather" | "energy" | None | "seaborn"
-        # )),
-        # ("save_features", SaveORLoad(mode='save')),
-        # #("save_features", SaveORLoad(mode='load')),
-        # ("#4 Train Models", ModelTraining(
-        #     target_column = 'renewable_generation_ratio',
-        #     test_size=0.2,
-        #     random_state=42,
-        #     plot_results=True
-        # ))
+        ("#3 Calculate features", FeatureExtraction(
+            target_column,
+            N_past_values= [24, 24*7],
+            N_future_values= 24,
+            N_past_target_values=24,
+            weather_columns= ['temp', 'wind_speed', 'clouds_all', 'rain_1h'],
+            generated_locations = ['madrid'], # choose city locations for feature generation (zenith, azimuth, etc.)
+            future_weather_prediction_columns = ['temp', 'wind_speed', 'clouds_all', 'rain_1h'],
+        )),
+        ("#3.5 Explore", Exploration(
+            nan_report=True,
+            plot_data=None,  # "All" | "weather" | "energy" | None | "seaborn"
+        )),
+        ("save_features", SaveORLoad(mode='save')),
+        #("save_features", SaveORLoad(mode='load')),
+        ("#4 Train Models", ModelTraining(
+            target_column = 'renewable_generation_ratio',
+            test_size=0.2,
+            random_state=42,
+            plot_results=True
+        ))
     ])
     return pipe
 
