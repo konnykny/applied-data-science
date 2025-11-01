@@ -101,16 +101,25 @@ class ModelTraining(BaseEstimator, RegressorMixin):
 
         data = pd.concat([X, y], axis=1).dropna(axis=0, how="any")
         # remove the datetime columns
-        for col in data.columns:
-            print(f'{col} -> {data[col].dtype}')
+        #for col in data.columns:
+        #    print(f'{col} -> {data[col].dtype}')
+
+        time_col = pd.to_datetime(data['time__original_tz'], utc=True).copy(deep=True)
+        print(time_col.dtype)
+        print(time_col)
         data = data.drop(columns=['time__original_tz'])
 
         y = data.iloc[:, -1]
         X = data.iloc[:, :-1]
 
-        X_tr, X_te, y_tr, y_te = _chronological_split(X, y, test_size=self.test_size)
+        X, y, time_col = self._preprocess_multi_target(X, y, time_col)
+        print(X.shape, y.shape)
+        print(time_col.dtype)
 
-        models = {
+        X_tr, X_te, y_tr, y_te, time_tr, time_te = _chronological_split(X, y, time_col, test_size=self.test_size)
+        print(time_te.dtype)
+
+        base_models = {
             "XGBoost": xgb.XGBRegressor(
                 n_estimators=500, learning_rate=0.05, max_depth=6,
                 subsample=0.8, colsample_bytree=0.8, reg_lambda=1.0,
@@ -151,13 +160,6 @@ class ModelTraining(BaseEstimator, RegressorMixin):
                 horizon_scores[i] = {"R2": h_r2, "MAE": h_mae, "RMSE": h_rmse}
 
             # store
-            # fitted[name] = model
-            # print(f"[ModelTraining] {name}: R2={r2:.4f}  MAE={mae:.4f}  RMSE={rmse:.4f}")
-            if name == 'XGBoost':
-                xgb.plot_importance(model)
-                plt.show()
-
-            #############################
             fitted[name] = model
             scores[name] = {
                 "Overall": {"R2": r2, "MAE": mae, "RMSE": rmse},
@@ -168,8 +170,6 @@ class ModelTraining(BaseEstimator, RegressorMixin):
             for i in range(self.prediction_horizon):
                 print(f'    [horizon t+{i+1}]: R2={horizon_scores[i]["R2"]:.4f}  MAE={horizon_scores[i]["MAE"]:.4f}  RMSE={horizon_scores[i]["RMSE"]:.4f}')
 
-
-
         best_name = min(scores, key=lambda k: scores[k]["Overall"]["RMSE"])
         self.best_estimator_ = fitted[best_name]
         self.best_scores_ = scores
@@ -179,8 +179,6 @@ class ModelTraining(BaseEstimator, RegressorMixin):
         #    pred = self.best_estimator_.predict(X_te)
         #    _plot_metrics(y_te, pd.Series(pred, index=y_te.index), title=f"Best: {best_name}")
 
-
-        # I killed the time_te sorry!!
         print('saving predictions')
         with open('./test_results.pkl', 'wb') as f:
             pickle.dump({
