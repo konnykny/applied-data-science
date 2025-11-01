@@ -1,3 +1,4 @@
+
 from __future__ import annotations
 from dataclasses import dataclass
 from typing import List, Dict, Tuple
@@ -5,6 +6,8 @@ from joblib import delayed, Parallel
 import pvlib
 from pvlib.location import Location
 import pycatch22
+import os.path as osp
+import pickle
 # import tqdm
 
 import numpy as np
@@ -82,6 +85,9 @@ def _catch22_features(x: pd.Series, window: int, prefix: str) -> pd.DataFrame:
 ### start prediction 2x a day from (local time) eg 8AM and again from eg 5 PM
 
 class FeatureExtraction(BaseEstimator, TransformerMixin):
+
+    file_path: str = './features_dataframe.pkl'
+
     def __init__(self,
                  target_column: str,
                  weather_columns: List[str],
@@ -91,9 +97,13 @@ class FeatureExtraction(BaseEstimator, TransformerMixin):
                  add_raw_target = True,
                  N_past_target_values: int = 24,
                  generated_locations=['madrid'],
-                 future_weather_prediction_columns: List[str] = None) -> None:
+                 future_weather_prediction_columns: List[str] = None,
+                 verbose = 1,
+                 use_pickle: bool = True) -> None:
 
         self.target_column = target_column
+        self.use_pickle = use_pickle
+        self.verbose = verbose
         self.weather_cols = weather_columns
         self.N_past_target_values = N_past_target_values
         self.N_future_values = int(N_future_values)
@@ -146,6 +156,15 @@ class FeatureExtraction(BaseEstimator, TransformerMixin):
             return self
 
     def transform(self, X: pd.DataFrame) -> pd.DataFrame:
+        if not isinstance(X, pd.DataFrame):
+            raise TypeError("FeatureExtraction expects a pandas DataFrame.")
+
+        if self.use_pickle and osp.isfile(self.file_path):
+            with open(self.file_path, 'rb') as f:
+                F = pickle.load(f)
+            print(f'[feature extraction] Loading Preprocessed features from pickle: {self.file_path}')
+            return F
+
         df = X.copy()
         if not isinstance(df.index, pd.DatetimeIndex):
             raise ValueError("FeatureExtraction requires a DatetimeIndex.")
@@ -173,11 +192,24 @@ class FeatureExtraction(BaseEstimator, TransformerMixin):
 
         F = F.dropna(axis=1, how="all")  # drop all-NaN columns
 
-        # if you require rows with no NaNs at all:
-        # F = F.dropna(axis=0, how="any")
+        # previous code
+        #     for i in range(24, 48):  # TODO() check
+        #         # shift amount: i=0 -> shift N (value at t-N hours), i=N-1 -> shift 1 (value at t-1 hour)
+        #         shift_amount = N - i
+        #         col_name = f"{self.target_column}_{i}"
+        #         F[col_name] = orig_target.shift(shift_amount)
+        # F = F.dropna(axis=1, how="all")
+        # for col in F.columns:
+        #     print(f'{col} -> {F[col].isna().sum()}')
+        # print('[feature extraction] Done')
+
+        if self.use_pickle:
+            print(f'[feature extraction] Saving features to: {self.file_path}')
+            with open(self.file_path, 'wb') as f:
+                pickle.dump(F, f)
+            F.to_csv(self.file_path.replace('pkl', 'csv'))
 
         return F
-
 
 
 class SaveORLoad(BaseEstimator, TransformerMixin):
@@ -208,7 +240,7 @@ class Catch22FeatureExtractor(BaseEstimator, TransformerMixin):
         for k_p, k_f in zip(windows_past_hrs, windows_future_hrs):
             assert k_p + k_f >= 3
 
-        self.target_cols = target_cols # list of columns to extract features from
+        self.target_cols = target_cols
         self.njobs_default = njobs_default
 
         # incides to crop the merged dataframe
@@ -391,4 +423,5 @@ class WeatherFeaturesExtractor(BaseEstimator, TransformerMixin):
         }, index=df.index)
 
         return features
-
+    
+    
