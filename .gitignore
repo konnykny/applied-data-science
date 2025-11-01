@@ -211,3 +211,4 @@ __marimo__/
 /.idea/applied-data-science.iml
 *.xml
 data/processed_dataframe.pkl
+/.idea/
