@@ -1,4 +1,3 @@
-
 from __future__ import annotations
 from dataclasses import dataclass
 from typing import Optional, Tuple
@@ -224,152 +223,132 @@ class ModelTraining(BaseEstimator, RegressorMixin):
 
 class  MultiRegXGBoostTraining(ModelTraining):
     def fit(self, X: pd.DataFrame, y: Optional[pd.Series] = None):
-        if y is None:
-            if self.target_column is None or self.target_column not in X.columns:
-                raise ValueError("Provide y or specify target_column present in X.")
-            y = X[self.target_column]
-            X = X.drop(columns=[self.target_column])
-            X = X.drop(columns=X_forbidden_cols, errors='ignore')
+        """
+        Train a multi-output XGBoost model to predict the 24-hour window targets.
 
-        data = pd.concat([X, y], axis=1).dropna(axis=0, how="any")
+        Behavior:
+        - If X already contains columns named like 'future_{target_column}_<num>' these are used
+          (sorted by trailing integer) as the multi-target y. Those columns are removed from X
+          before training.
+        - Otherwise, fall back to the previous behavior: take `self.target_column` from X and
+          construct multi-target horizon columns by shifting.
+        - Trains a MultiOutputRegressor wrapped XGBoost model and computes a feature importance
+          report (mean importance across targets) saved to './xgb_feature_importance.csv'.
+        """
 
-        time_col = pd.to_datetime(data['time__original_tz'], utc=True).copy(deep=True)
+        X = X.copy()
+
+        # try to collect existing future_*_f target columns
+
+        # future_clouds_all_f14
+
+        future_prefix = f'future_{self.target_column}_f'
+        future_cols = [c for c in X.columns if c.startswith(future_prefix)]
+
+        if y is None and future_cols:
+            # sort by trailing integer if possible
+            def _suffix_int(col: str):
+                s = col[len(future_prefix):]
+                # remove leading underscores
+                s = s.lstrip('_')
+                try:
+                    return int(s)
+                except Exception:
+                    # fallback: find last integer token
+                    for token in reversed(col.split('_')):
+                        if token.isdigit():
+                            return int(token)
+                    return 0
+
+            future_cols_sorted = sorted(future_cols, key=_suffix_int)
+            y_df = X[future_cols_sorted].copy()
+            X = X.drop(columns=future_cols_sorted)
+        else:
+            # fallback to original flow: use single target column and produce shifted multi-target
+            if y is None:
+                if self.target_column is None or self.target_column not in X.columns:
+                    raise ValueError("Provide y or specify target_column present in X.")
+                y_series = X[self.target_column].copy()
+                X = X.drop(columns=[self.target_column])
+                # construct multi-target by shifting
+                y_df = pd.DataFrame({f'future_{self.target_column}_f{i}': y_series.shift(i) for i in range(0, self.prediction_horizon)})
+                # keep alignment: drop tail rows where future horizon missing
+                y_df = y_df.iloc[:-y_df.shape[0] % self.prediction_horizon]
+
+        # concat and drop rows with any NaNs (keeps index aligned)
+        data = pd.concat([X, y_df], axis=1)
+        if 'time__original_tz' in data.columns:
+            # time column may be present in X; keep for splitting
+            time_col = pd.to_datetime(data['time__original_tz'], utc=True).copy(deep=True)
+        else:
+            raise ValueError("time__original_tz column required in data for chronological split")
+
+        # drop rows with any NaN (user previously used dropna)
+        data = data.dropna(axis=0, how='any')
+
+        # remove time column before training
         data = data.drop(columns=['time__original_tz'])
 
-        y = data.iloc[:, -1]
-        X = data.iloc[:, :-1]
+        n_targets = y_df.shape[1]
+        y_final = data.iloc[:, -n_targets:]
+        X_final = data.iloc[:, :-n_targets]
 
-        X, y, time_col = self._preprocess_multi_target(X, y, time_col)
+        # chronological split
+        X_tr, X_te, y_tr, y_te, time_tr, time_te = _chronological_split(X_final, y_final, time_col.loc[data.index], test_size=self.test_size)
 
-        X_tr, X_te, y_tr, y_te, time_tr, time_te = _chronological_split(X, y, time_col, test_size=self.test_size)
-
-        model = xgb.XGBRegressor(
+        # Train multioutput XGBoost via sklearn wrapper
+        base = xgb.XGBRegressor(
             n_estimators=500, learning_rate=0.05, max_depth=6,
             subsample=0.8, colsample_bytree=0.8, reg_lambda=1.0,
-            random_state=self.random_state, n_jobs=-1, verbose=2
+            random_state=self.random_state, verbosity=1, n_jobs=-1,
+            objective='reg:squarederror'
         )
 
+        print("[MultiRegXGBoostTraining] Training MultiOutputRegressor with XGBoost base...")
+
+        model = MultiOutputRegressor(base, n_jobs=-1)
         model.fit(X_tr, y_tr)
 
         pred = model.predict(X_te)
 
+        # overall metrics
         r2 = r2_score(y_te, pred)
         mae = mean_absolute_error(y_te, pred)
         rmse = root_mean_squared_error(y_te, pred)
 
         print(f"[MultiRegXGBoostTraining] Overall: R2={r2:.4f}  MAE={mae:.4f}  RMSE={rmse:.4f}")
 
+        # feature importance report: average importance across outputs
+        try:
+            importances = np.vstack([est.feature_importances_ for est in model.estimators_])
+            mean_imp = np.mean(importances, axis=0)
+            imp_df = pd.DataFrame(importances, index=[f'target_{i}' for i in range(importances.shape[0])], columns=X_tr.columns)
+            imp_df.loc['mean'] = mean_imp
+            imp_df.T.sort_values('mean', ascending=False).to_csv('./xgb_feature_importance.csv')
+            print('[MultiRegXGBoostTraining] Saved feature importance report to ./xgb_feature_importance.csv')
+        except Exception as e:
+            print('[MultiRegXGBoostTraining] Could not compute feature importances:', e)
+
+        # store results
         self.best_estimator_ = model
         self.best_scores_ = {
             "Overall": {"R2": r2, "MAE": mae, "RMSE": rmse}
         }
-        self.feature_names_in_ = X.columns
+        self.feature_names_in_ = X_final.columns
 
-        return self
-
-
-    def fit(self, X: pd.DataFrame, y: Optional[pd.Series] = None):
-        if y is None:
-            if self.target_column is None or self.target_column not in X.columns:
-                raise ValueError("Provide y or specify target_column present in X.")
-            y = X[self.target_column]
-            X = X.drop(columns=[self.target_column])
-            X = X.drop(columns=X_forbidden_cols, errors='ignore')
-
-        data = pd.concat([X, y], axis=1).dropna(axis=0, how="any")
-        # remove the datetime columns
-        #for col in data.columns:
-        #    print(f'{col} -> {data[col].dtype}')
-
-        time_col = pd.to_datetime(data['time__original_tz'], utc=True).copy(deep=True)
-        print(time_col.dtype)
-        print(time_col)
-        data = data.drop(columns=['time__original_tz'])
-
-        y = data.iloc[:, -1]
-        X = data.iloc[:, :-1]
-
-        X, y, time_col = self._preprocess_multi_target(X, y, time_col)
-        print(X.shape, y.shape)
-        print(time_col.dtype)
-
-        X_tr, X_te, y_tr, y_te, time_tr, time_te = _chronological_split(X, y, time_col, test_size=self.test_size)
-        print(time_te.dtype)
-
-        base_models = {
-            "XGBoost": xgb.XGBRegressor(
-                n_estimators=500, learning_rate=0.05, max_depth=6,
-                subsample=0.8, colsample_bytree=0.8, reg_lambda=1.0,
-                random_state=self.random_state, n_jobs=-1, verbose=2),
-            #"LinearRegression": LinearRegression(),
-            #"RandomForest": RandomForestRegressor(n_estimators=300, random_state=self.random_state, n_jobs=-1),
-        }
-
-        print(f'target col: {self.target_column}')
-        print(f'traning cols ({len(X.columns)})')
-        # for col in X.columns:
-        #     print(f'   {col} ({X[col].dtype})-> {X[col].isna().sum()}')
-        print(X.info())
-
-        scores = {}
-        fitted = {}
-        predictions = {}
-        for name, base_model in base_models.items():
-
-            # wrap 1 model -> one horizon
-            model = MultiOutputRegressor(base_model, n_jobs=-1)
-            model.fit(X_tr, y_tr)
-
-            # predict
-            pred = model.predict(X_te)
-
-            # get the overall metrics
-            r2 = r2_score(y_te, pred)
-            mae = mean_absolute_error(y_te, pred)
-            rmse = root_mean_squared_error(y_te, pred)
-
-            # get the metrics per individual predictoon horizon
-            horizon_scores = {}
-            for i in range(self.prediction_horizon):
-                h_r2 = r2_score(y_te.iloc[:, i], pred[:, i])
-                h_mae = mean_absolute_error(y_te.iloc[:, i], pred[:, i])
-                h_rmse = root_mean_squared_error(y_te.iloc[:, i], pred[:, i])
-                horizon_scores[i] = {"R2": h_r2, "MAE": h_mae, "RMSE": h_rmse}
-
-            # store
-            fitted[name] = model
-            scores[name] = {
-                "Overall": {"R2": r2, "MAE": mae, "RMSE": rmse},
-                "ByHorizon": horizon_scores
-            }
-            predictions[name] = pred
-            print(f"[ModelTraining] {name} (overall): R2={r2:.4f}  MAE={mae:.4f}  RMSE={rmse:.4f}")
-            for i in range(self.prediction_horizon):
-                print(f'    [horizon t+{i+1}]: R2={horizon_scores[i]["R2"]:.4f}  MAE={horizon_scores[i]["MAE"]:.4f}  RMSE={horizon_scores[i]["RMSE"]:.4f}')
-
-        best_name = min(scores, key=lambda k: scores[k]["Overall"]["RMSE"])
-        self.best_estimator_ = fitted[best_name]
-        self.best_scores_ = scores
-        self.feature_names_in_ = X.columns
-
-        #if self.plot_results:
-        #    pred = self.best_estimator_.predict(X_te)
-        #    _plot_metrics(y_te, pd.Series(pred, index=y_te.index), title=f"Best: {best_name}")
-
-        print('saving predictions')
+        # save predictions and model like previous implementation
         with open('./test_results.pkl', 'wb') as f:
             pickle.dump({
                 'x': X_te,
                 'preds': pred,
                 'gt': y_te,
-                'adjusted_preds': self._postprocess_predictions(pred, time_te),
+                'adjusted_preds': self._postprocess_predictions(pd.DataFrame(pred, index=y_te.index), time_te),
                 'adjusted_gt': self._postprocess_predictions(y_te, time_te),
                 'time': time_col,
                 'pred_time': self._postprocess_predictions(time_te.copy(deep=True), time_te)
             }, f)
 
-        print('saving the models')
         with open('./models.pkl', 'wb') as f:
-            pickle.dump(fitted, f)
+            pickle.dump({'model': model}, f)
 
         return self

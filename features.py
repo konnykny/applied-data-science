@@ -1,4 +1,3 @@
-
 from __future__ import annotations
 from dataclasses import dataclass
 from typing import List, Dict, Tuple
@@ -89,17 +88,19 @@ class FeatureExtraction(BaseEstimator, TransformerMixin):
     file_path: str = './features_dataframe.pkl'
 
     def __init__(self,
-                 target_column: str,
-                 weather_columns: List[str],
-                 N_past_values: List[int] = [24, 7*24],
-                 N_future_values: int = 24,
-                 n_jobs: int = 16,
-                 add_raw_target = True,
-                 N_past_target_values: int = 24,
-                 generated_locations=['madrid'],
-                 future_weather_prediction_columns: List[str] = None,
-                 verbose = 1,
-                 use_pickle: bool = True) -> None:
+            target_column: str,
+            weather_columns: List[str],
+            N_past_values: List[int] = [24, 7*24],
+            N_future_values: int = 24,
+            n_jobs: int = 16,
+            add_raw_target = True,
+            N_past_target_values: int = 24,
+            generated_locations=['madrid'],
+            future_columns: List[str] = None,
+            verbose = 1,
+            use_pickle: bool = False,
+            prediction_time_of_day = 8) -> None:
+
 
         self.target_column = target_column
         self.use_pickle = use_pickle
@@ -107,9 +108,10 @@ class FeatureExtraction(BaseEstimator, TransformerMixin):
         self.weather_cols = weather_columns
         self.N_past_target_values = N_past_target_values
         self.N_future_values = int(N_future_values)
-        self.future_weather_prediction_columns = future_weather_prediction_columns or []
+        self.future_columns = future_columns or []
         self.weather_extractor = WeatherFeaturesExtractor(cities=generated_locations)
         self.add_raw_target = add_raw_target
+        self.prediction_time_of_day = prediction_time_of_day
         # initialize with empty cols -> set before usage in transform
         all_windows_past = [*N_past_values, 0]
         all_windows_future = [*[0 for _ in N_past_values], self.N_future_values]
@@ -125,29 +127,66 @@ class FeatureExtraction(BaseEstimator, TransformerMixin):
     def _add_future_values_from_columns(self, F: pd.DataFrame, src_df: pd.DataFrame,
                                         src_columns: List[str]) -> pd.DataFrame:
         if not src_columns:
+            print("Not adding future cols, no src_columns specified")
             return F
         for col in src_columns:
+            print(f'[feature extraction] Adding future values for column: {col}')
             if col not in src_df.columns:
+                # create N_future_values columns filled with NaN when source column missing
                 for i in range(self.N_future_values):
                     F[f"future_{col}_f{i}"] = np.nan
                 continue
             # shift on full series, then reindex to F to avoid edge NaNs
             full_series = src_df[col]
+            # produce exactly N_future_values columns: future_{col}_f0 .. future_{col}_f{N-1}
             for i in range(self.N_future_values):
-                col_name = f"future_{col}_{i}"
+                col_name = f"future_{col}_f{i}"
                 shifted = full_series.shift(-(i + 1))  # t+1..t+N
                 F[col_name] = shifted.reindex(F.index)
         return F
 
 
-    # TODO!! feel free to implement
-    def shift_to_daily_rows(self, df: pd.DataFrame, prediction_hour_utc: int = 8) -> pd.DataFrame:
-        # Do groupby/resample to day, but keep individual 24 hrs of each feature in the same row,
-        # and name column according to starting time at 'prediction_hour_utc' e.g. 8 for 8AM UTC
-        #
-        #
+    def pick_rows(self, df: pd.DataFrame, prediction_hour_local: int = 8) -> pd.DataFrame:
+        # Accept either an int hour or a pandas datetime-like (time component used).
+        pred = self.prediction_time_of_day if prediction_hour_local is None else prediction_hour_local
 
-        pass
+        if pred is None:
+            raise ValueError("prediction_time_of_day must be set (int hour or datetime-like)")
+
+        if isinstance(pred, (int, np.integer)):
+            hour = int(pred)
+            minute = 0
+        else:
+            t = pd.to_datetime(pred)
+            hour = t.hour
+            minute = t.minute
+
+        times = pd.to_datetime(df.index, errors='coerce')
+
+        # If parsed values are tz-aware -> convert to Europe/Madrid
+        if getattr(times, "tz", None) is not None:
+            idx_local = pd.DatetimeIndex(times.dt.tz_convert('Europe/Madrid'))
+        else:
+            # If naive but some entries may include offsets, try parsing with utc then convert.
+            try:
+                idx_local = pd.DatetimeIndex(pd.to_datetime(df.index, utc=True).tz_convert('Europe/Madrid'))
+            except Exception:
+                # Fallback: treat as local naive times and localize to Europe/Madrid
+                idx_local = pd.DatetimeIndex(times.tz_localize('Europe/Madrid'))
+
+        df_local = df.copy()
+        df_local.index = idx_local
+
+        # select rows that fall exactly at the desired local hour/minute
+        mask = (df_local.index.hour == hour) & (df_local.index.minute == minute)
+        selected = df_local.loc[mask]
+
+        # Normalize index to naive date (one row per day)
+        if not selected.empty:
+            dates = selected.index.date
+            selected.index = pd.DatetimeIndex(pd.to_datetime(dates))
+
+        return selected
 
     def fit(self, X: pd.DataFrame, y: pd.DataFrame = None) -> 'FeatureExtraction':
         if (self.target_column is None) or (self.target_column not in X.columns):
@@ -169,32 +208,45 @@ class FeatureExtraction(BaseEstimator, TransformerMixin):
         if not isinstance(df.index, pd.DatetimeIndex):
             raise ValueError("FeatureExtraction requires a DatetimeIndex.")
 
+
+        print("[feature extraction] Starting feature extraction...")
+        print("creating cyclic time features...")
         weekday = _cyclic_encode(pd.Series(df.index.weekday, index=df.index), 7, "weekday")
         minute_of_day = df.index.hour * 60 + df.index.minute
         time_of_day = _cyclic_encode(pd.Series(minute_of_day, index=df.index), 24 * 60, "tod")
         day_of_year = _cyclic_encode(pd.Series(df.index.dayofyear, index=df.index), 366, "doy")
 
+        print("computing astronomical features...")
         sun_features = self.weather_extractor.transform(df)
+
 
         F = pd.concat([weekday, time_of_day, day_of_year, sun_features], axis=1)
         F = pd.concat([df, F], axis=1)
+
+        print("Calculating catch22 features on past weather data...")
         F = self.catch22_weather_extractor.transform(F)
 
+        # add past target values AND(!) future target values, THEN resample to daily at prediction hour
+        # 23 is latest value
+        print("Adding past and future target values...")
         if self.add_raw_target:
-            past_N = int(self.N_past_target_values)
-            for i in range(past_N):
+            F[f'past_{self.target_column}_23'] = F[self.target_column]
+            F.drop(self.target_column, axis=1, inplace=True)
+            past_N = int(self.N_past_target_values-1)
+            for i in range(1, past_N): #  make sure 23 targets after current
                 shift_amount = past_N - i  # positive -> past
                 col_name = f"past_{self.target_column}_{i}"
                 # shift on full series, then reindex to F to avoid head NaNs
                 F[col_name] = df[self.target_column].shift(shift_amount).reindex(F.index)
 
-            F = self._add_future_values_from_columns(F, df, self.future_weather_prediction_columns)
+            print(f'Adding future target values:\n{self.future_columns}')
+            F = self._add_future_values_from_columns(F, df, self.future_columns)
+            # pick only the rows at the configured local prediction time and return daily rows
+            print(F.columns)
+            F = self.pick_rows(F, prediction_hour_local=self.prediction_time_of_day)
 
         F = F.dropna(axis=1, how="all")  # drop all-NaN columns
 
-        # previous code
-        #     for i in range(24, 48):  # TODO() check
-        #         # shift amount: i=0 -> shift N (value at t-N hours), i=N-1 -> shift 1 (value at t-1 hour)
         #         shift_amount = N - i
         #         col_name = f"{self.target_column}_{i}"
         #         F[col_name] = orig_target.shift(shift_amount)
@@ -423,5 +475,4 @@ class WeatherFeaturesExtractor(BaseEstimator, TransformerMixin):
         }, index=df.index)
 
         return features
-    
-    
+

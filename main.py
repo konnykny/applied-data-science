@@ -4,7 +4,7 @@ from sklearn.pipeline import Pipeline
 from preprocessing import Preprocessing
 from exploration import Exploration
 from features import FeatureExtraction, SaveORLoad
-from modeling import ModelTraining
+from modeling import ModelTraining, MultiRegXGBoostTraining
 
 
 def build_pipeline(data_dir_or_paths, target_column=None):
@@ -15,7 +15,7 @@ def build_pipeline(data_dir_or_paths, target_column=None):
             ffill_amt = 3,
             sampling_interval = 1,
             drop_na = True,
-            load_pickle_instead = None, #f'{data_dir}\preprocessed_dataframe.pkl',
+            load_pickle_instead = None, #f'./data/preprocessed_dataframe.pkl',
             save_pickle = True,
             drop_energy_details = True,
         )),
@@ -30,15 +30,17 @@ def build_pipeline(data_dir_or_paths, target_column=None):
             N_past_target_values=24,
             weather_columns= ['temp', 'wind_speed', 'clouds_all', 'rain_1h'],
             generated_locations = ['madrid'], # choose city locations for feature generation (zenith, azimuth, etc.)
-            future_weather_prediction_columns = ['temp', 'wind_speed', 'clouds_all', 'rain_1h'],
+            future_columns = [target_column, 'temp', 'wind_speed', 'clouds_all', 'rain_1h'],
+            prediction_time_of_day = 8, # local time hour when prediction should be trained and run
+            use_pickle = False,
         )),
         ("#3.5 Explore", Exploration(
             nan_report=True,
             plot_data=None,  # "All" | "weather" | "energy" | None | "seaborn"
         )),
         ("save_features", SaveORLoad(mode='save')),
-        #("save_features", SaveORLoad(mode='load')),
-        ("#4 Train Models", ModelTraining(
+        # ("load_features", SaveORLoad(mode='load')),
+        ("#4 Train Models", MultiRegXGBoostTraining( #ModelTraining
             target_column = 'renewable_generation_ratio',
             test_size=0.2,
             random_state=42,
