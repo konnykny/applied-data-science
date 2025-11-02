@@ -56,6 +56,9 @@ if __name__ == "__main__":
         data_dir_or_paths='./data', #os.environ.get("DATA_DIR", "."),
         target_column='renewable_generation_ratio'
     )
-    output = pipeline.fit_transform(None)
+    prediction = pipeline.fit_transform(None)
+#%%
+    print(prediction)
+
     pass # for breakpoint
     print("[main] Pipeline completed.")

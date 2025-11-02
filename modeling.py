@@ -283,12 +283,13 @@ class  MultiRegXGBoostTraining(ModelTraining):
         model = MultiOutputRegressor(base, n_jobs=-1)
         model.fit(X_tr, y_tr)
 
-        pred = model.predict(X_te)
+        y_pred = model.predict(X_te)
+        self.pred = y_pred
 
         # overall metrics
-        r2 = r2_score(y_te, pred)
-        mae = mean_absolute_error(y_te, pred)
-        rmse = root_mean_squared_error(y_te, pred)
+        r2 = r2_score(y_te, y_pred)
+        mae = mean_absolute_error(y_te, y_pred)
+        rmse = root_mean_squared_error(y_te, y_pred)
 
         print(f"[MultiRegXGBoostTraining] Overall: R2={r2:.4f}  MAE={mae:.4f}  RMSE={rmse:.4f}")
 
@@ -298,7 +299,7 @@ class  MultiRegXGBoostTraining(ModelTraining):
         try:
             horizon_r2 = []
             for i in range(n_targets):
-                h_r2 = r2_score(y_te.iloc[:, i], pred[:, i])
+                h_r2 = r2_score(y_te.iloc[:, i], y_pred[:, i])
                 horizon_r2.append(h_r2)
 
             plt.figure(figsize=(10, 4))
@@ -350,9 +351,9 @@ class  MultiRegXGBoostTraining(ModelTraining):
         with open('./test_results.pkl', 'wb') as f:
             pickle.dump({
                 'x': X_te,
-                'preds': pred,
+                'preds': y_pred,
                 'gt': y_te,
-                'adjusted_preds': self._postprocess_predictions(pd.DataFrame(pred, index=y_te.index), time_te),
+                'adjusted_preds': self._postprocess_predictions(pd.DataFrame(y_pred, index=y_te.index), time_te),
                 'adjusted_gt': self._postprocess_predictions(y_te, time_te),
                 'time': time_col,
                 'pred_time': self._postprocess_predictions(time_te.copy(deep=True), time_te)
@@ -361,4 +362,14 @@ class  MultiRegXGBoostTraining(ModelTraining):
         with open('./models.pkl', 'wb') as f:
             pickle.dump({'model': model}, f)
 
-        return self
+        # Build and return a DataFrame indexed by the original time values (time_te)
+        try:
+            gt_df = pd.DataFrame(y_te).copy()
+            pred_df = pd.DataFrame(y_pred, index=y_te.index, columns=[f'pred_{c}' for c in y_te.columns])
+            results_df = pd.concat([gt_df, pred_df], axis=1)
+            # set index to the datetime index from the chronological split (use original time_col aligned to y_te)
+            results_df.index = pd.to_datetime(time_col.loc[y_te.index])
+        except Exception:
+            return self
+
+        return results_df
