@@ -20,7 +20,6 @@ X_forbidden_cols = [
     'price actual',
     'price day ahead',
     'total load forecast',
-
     # 'generation wind onshore',
     # 'generation waste',
     #
@@ -39,7 +38,7 @@ X_forbidden_cols = [
 
     'total_fossil_generation',
     'total_renewable_generation',
-    'renewable_generation_ratio',
+    # 'renewable_generation_ratio',
 
     # 'time__original_tz',
 ]
@@ -136,6 +135,7 @@ class ModelTraining(BaseEstimator, RegressorMixin):
         scores = {}
         fitted = {}
         predictions = {}
+        pred = None
         for name, base_model in base_models.items():
 
             # wrap 1 model -> one horizon
@@ -238,63 +238,37 @@ class  MultiRegXGBoostTraining(ModelTraining):
 
         X = X.copy()
 
-        # try to collect existing future_*_f target columns
-
-        # future_clouds_all_f14
-
+        # get target columns
         future_prefix = f'future_{self.target_column}_f'
         future_cols = [c for c in X.columns if c.startswith(future_prefix)]
+        n_targets = len(future_cols)
 
-        if y is None and future_cols:
-            # sort by trailing integer if possible
-            def _suffix_int(col: str):
-                s = col[len(future_prefix):]
-                # remove leading underscores
-                s = s.lstrip('_')
-                try:
-                    return int(s)
-                except Exception:
-                    # fallback: find last integer token
-                    for token in reversed(col.split('_')):
-                        if token.isdigit():
-                            return int(token)
-                    return 0
-
-            future_cols_sorted = sorted(future_cols, key=_suffix_int)
-            y_df = X[future_cols_sorted].copy()
-            X = X.drop(columns=future_cols_sorted)
-        else:
-            # fallback to original flow: use single target column and produce shifted multi-target
-            if y is None:
-                if self.target_column is None or self.target_column not in X.columns:
-                    raise ValueError("Provide y or specify target_column present in X.")
-                y_series = X[self.target_column].copy()
-                X = X.drop(columns=[self.target_column])
-                # construct multi-target by shifting
-                y_df = pd.DataFrame({f'future_{self.target_column}_f{i}': y_series.shift(i) for i in range(0, self.prediction_horizon)})
-                # keep alignment: drop tail rows where future horizon missing
-                y_df = y_df.iloc[:-y_df.shape[0] % self.prediction_horizon]
-
-        # concat and drop rows with any NaNs (keeps index aligned)
-        data = pd.concat([X, y_df], axis=1)
-        if 'time__original_tz' in data.columns:
+        if 'time__original_tz' in X.columns:
             # time column may be present in X; keep for splitting
-            time_col = pd.to_datetime(data['time__original_tz'], utc=True).copy(deep=True)
+            time_col = pd.to_datetime(X['time__original_tz'], utc=True).copy(deep=True)
         else:
             raise ValueError("time__original_tz column required in data for chronological split")
 
+        y = pd.DataFrame(X[future_cols].copy())
+        X = X.drop(columns=future_cols)
+        X = X.drop(columns=['time__original_tz'])
+        X = X.drop(columns=X_forbidden_cols)
+
         # drop rows with any NaN (user previously used dropna)
-        data = data.dropna(axis=0, how='any')
+        X = X.dropna(axis=0, how='any')
+        X = X.drop(columns=['Unnamed: 0'], errors='ignore') # exists when loaded from pickle sometimes
 
-        # remove time column before training
-        data = data.drop(columns=['time__original_tz'])
+        print("data_____________")
+        print(X)
 
-        n_targets = y_df.shape[1]
-        y_final = data.iloc[:, -n_targets:]
-        X_final = data.iloc[:, :-n_targets]
+        print("y_____________")
+        print(y)
+
+        # X_final = X
+        # y_final = y
 
         # chronological split
-        X_tr, X_te, y_tr, y_te, time_tr, time_te = _chronological_split(X_final, y_final, time_col.loc[data.index], test_size=self.test_size)
+        X_tr, X_te, y_tr, y_te, time_tr, time_te = _chronological_split(X, y, time_col.loc[X.index], test_size=self.test_size)
 
         # Train multioutput XGBoost via sklearn wrapper
         base = xgb.XGBRegressor(
@@ -318,13 +292,49 @@ class  MultiRegXGBoostTraining(ModelTraining):
 
         print(f"[MultiRegXGBoostTraining] Overall: R2={r2:.4f}  MAE={mae:.4f}  RMSE={rmse:.4f}")
 
+
+
+        # --- New: compute and visualise R2 per prediction horizon ---
+        try:
+            horizon_r2 = []
+            for i in range(n_targets):
+                h_r2 = r2_score(y_te.iloc[:, i], pred[:, i])
+                horizon_r2.append(h_r2)
+
+            plt.figure(figsize=(10, 4))
+            x = list(range(1, n_targets + 1))
+            plt.bar(x, horizon_r2, color='C0', alpha=0.8)
+            plt.xlabel('Horizon (hours ahead)')
+            plt.ylabel('R2')
+            plt.title('[MultiRegXGBoostTraining] R2 per predicted hour')
+            plt.xticks(x)
+            plt.grid(axis='y', alpha=0.3)
+            plt.tight_layout()
+            plt.savefig('./r2_by_horizon.png')
+            plt.close()
+            print('[MultiRegXGBoostTraining] Saved R2 per horizon plot to ./r2_by_horizon.png')
+        except Exception as e:
+            print('[MultiRegXGBoostTraining] Could not create R2 per-horizon plot:', e)
+
         # feature importance report: average importance across outputs
         try:
             importances = np.vstack([est.feature_importances_ for est in model.estimators_])
             mean_imp = np.mean(importances, axis=0)
+            sum_imp = np.sum(importances, axis=0)
             imp_df = pd.DataFrame(importances, index=[f'target_{i}' for i in range(importances.shape[0])], columns=X_tr.columns)
+            # add summary rows
             imp_df.loc['mean'] = mean_imp
-            imp_df.T.sort_values('mean', ascending=False).to_csv('./xgb_feature_importance.csv')
+            imp_df.loc['sum'] = sum_imp
+
+            # transpose so features are rows; then put 'sum' column first, then target-specific columns, then 'mean'
+            out_df = imp_df.T
+            target_cols = [f'target_{i}' for i in range(importances.shape[0])]
+            cols_order = ['sum'] + target_cols + ['mean']
+            # some safety: keep only existing columns (in case of naming mismatch)
+            cols_order = [c for c in cols_order if c in out_df.columns]
+            out_df = out_df[cols_order]
+
+            out_df.sort_values(by='sum', ascending=False).to_csv('./xgb_feature_importance.csv')
             print('[MultiRegXGBoostTraining] Saved feature importance report to ./xgb_feature_importance.csv')
         except Exception as e:
             print('[MultiRegXGBoostTraining] Could not compute feature importances:', e)
@@ -334,7 +344,7 @@ class  MultiRegXGBoostTraining(ModelTraining):
         self.best_scores_ = {
             "Overall": {"R2": r2, "MAE": mae, "RMSE": rmse}
         }
-        self.feature_names_in_ = X_final.columns
+        self.feature_names_in_ = X.columns
 
         # save predictions and model like previous implementation
         with open('./test_results.pkl', 'wb') as f:

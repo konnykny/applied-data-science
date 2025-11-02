@@ -215,7 +215,7 @@ class Preprocessing(BaseEstimator, TransformerMixin):
 
         if self.save_pickle:
             pkl_path = self.load_pickle_instead or os.path.join(
-                os.path.dirname(energy_path), "processed_dataframe.pkl"
+                os.path.dirname(energy_path), "preprocessed_dataframe .pkl"
             )
             try:
                 df.to_csv(pkl_path.replace(".pkl", ".csv"))
