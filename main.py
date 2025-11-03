@@ -15,14 +15,14 @@ def build_pipeline(data_dir_or_paths, target_column=None):
         #     ffill_amt = 3,
         #     sampling_interval = 1,
         #     drop_na = True,
-        #     load_pickle_instead = './data/preprocessed_dataframe.pkl',
-        #     save_pickle = False,
+        #     load_pickle_instead = None, # './data/preprocessed_dataframe.pkl',
+        #     save_pickle = True,
         #     drop_energy_details = True,
         # )),
-        # # ("#2 Explore", Exploration(
-        # #     nan_report=True,
-        # #     plot_data=None,  # "All" | "weather" | "energy" | None | "seaborn"
-        # # )),
+        # ("#2 Explore", Exploration(
+        #     nan_report=True,
+        #     plot_data="All",  # "All" | "weather" | "energy" | None | "seaborn"
+        # )),
         # ("#3 Calculate features", FeatureExtraction(
         #     target_column,
         #     N_past_values= [24, 24*7],
@@ -30,8 +30,8 @@ def build_pipeline(data_dir_or_paths, target_column=None):
         #     N_past_target_values=24,
         #     weather_columns= ['temp', 'wind_speed', 'clouds_all', 'rain_1h'],
         #     generated_locations = ['madrid'], # choose city locations for feature generation (zenith, azimuth, etc.)
-        #     future_columns = [target_column, 'temp', 'wind_speed', 'clouds_all', 'rain_1h'],
-        #     prediction_time_of_day = 8, # local time hour when prediction should be trained and run
+        #     future_columns = [target_column, 'temp', 'wind_speed', 'clouds_all', 'rain_1h', 'solar_zenith', 'solar_azimuth'],
+        #     prediction_time_of_day = 11, # local time hour (24hrs) for which prediction should be trained and later run
         #     use_pickle = False,
         #     add_raw_target=True,
         # )),

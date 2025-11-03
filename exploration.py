@@ -57,9 +57,9 @@ class Exploration(BaseEstimator, TransformerMixin):
 
 
 
-
-        if self.plot_data is not None:
-            self._plot(X)
+        #
+        # if self.plot_data is not None:
+        #     self._plot(X)
 
         ### debugging plot
         # if "generation nuclear" in X.columns:

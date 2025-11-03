@@ -372,4 +372,9 @@ class  MultiRegXGBoostTraining(ModelTraining):
         except Exception:
             return self
 
-        return results_df
+        self.results_df = results_df
+
+        return self
+
+    def transform(self, X: pd.DataFrame) -> np.ndarray: # transform = predict
+        return self.results_df
