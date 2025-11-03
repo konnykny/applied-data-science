@@ -2,7 +2,7 @@
 import os
 from sklearn.pipeline import Pipeline
 from preprocessing import Preprocessing
-from exploration import Exploration
+from exploration_pipe import Exploration
 from features import FeatureExtraction, SaveORLoad
 from modeling import ModelTraining, MultiRegXGBoostTraining
 
