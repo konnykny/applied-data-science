@@ -212,3 +212,5 @@ __marimo__/
 *.xml
 data/processed_dataframe.pkl
 /.idea/
+data/.DS_Store
+data/spanish-cities-energy-consumption/energy_dataset.xlsx
