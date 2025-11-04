@@ -207,7 +207,7 @@ class Preprocessing(BaseEstimator, TransformerMixin):
             
             df["total_renewable_generation"] = df[renew_cols].sum(axis=1) if renew_cols else 0.0
             df["total_fossil_generation"] = df[fossil_cols].sum(axis=1) if fossil_cols else 0.0
-            df["renewable_generation_ratio"] = df["total_renewable_generation"] / (df["total_renewable_generation"] + df["total_fossil_generation"])
+            df["green_generation_ratio"] = df["total_renewable_generation"] / (df["total_renewable_generation"] + df["total_fossil_generation"])
 
             # remove the original detailed generation columns
             if self.drop_energy_details:

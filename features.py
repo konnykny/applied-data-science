@@ -335,7 +335,7 @@ class Catch22FeatureExtractor(BaseEstimator, TransformerMixin):
             for k, (start_ids, end_ids) in enumerate(zip(start_ids_list, end_ids_list)):
                 results_col = Parallel(n_jobs=njobs)(
                     delayed(pycatch22.catch22_all)(
-                        X[col].iloc[start_ids[i]:end_ids[i] + 1], catch24=False,  # TODO CHECK IMPACT
+                        X[col].iloc[start_ids[i]:end_ids[i] + 1], catch24=True,  # TODO CHECK IMPACT
                             short_names=True, )
                     for i in range(start_ids.shape[0])
                 )
