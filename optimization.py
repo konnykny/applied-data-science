@@ -78,7 +78,7 @@ def optimize(
                 charging_hours_dict[v] = [i for i in T if X[v, i].x > 0.5]
             result_dict['charging_hours_per_vehicle'].append(charging_hours_dict)
             # Average renewable share
-            result_dict['total_renew'].append(sum(renew_share[i] * X[v, i].x for v in V for i in T))
+            result_dict['total_renew'].append(sum(renew_share[day_idx, i] * X[v, i].x for v in V for i in T))
             result_dict['total_charges'].append(len(V) * required_hours)
             result_dict['avg_renew_share'].append(result_dict['total_renew'][-1] / result_dict['total_charges'][-1])
         else:

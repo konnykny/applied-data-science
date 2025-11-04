@@ -9,16 +9,15 @@ from optim_scenarios import example01
 from optimization_baseline import baseline_scheduling, visualize_schedule
 
 
-def score_charging_plan(charging_schedule_per_day: List[Dict], total_charges_per_day: List[int], renewable_ratio_per_day: ArrayLike, pred_hour: int) -> Tuple[NDArray, float]:
+def score_charging_plan(charging_schedule_per_day: List[Dict], total_charges_per_day: List[int], renewable_ratio_per_day: ArrayLike) -> Tuple[NDArray, float]:
 
     renewable_ratio_per_day = np.asarray(renewable_ratio_per_day, dtype=float)
-    renewable_ratio_per_day_aligned = np.roll(renewable_ratio_per_day, axis=1, shift=pred_hour)
 
-    daily_renew_ratios = np.zeros((renewable_ratio_per_day_aligned.shape[0],), dtype=float)
+    daily_renew_ratios = np.zeros((renewable_ratio_per_day.shape[0],), dtype=float)
     for day_idx in range(len(daily_renew_ratios)):
         schedule_per_car = charging_schedule_per_day[day_idx]
         total_charges = total_charges_per_day[day_idx]
-        renewable_ratio = renewable_ratio_per_day_aligned[day_idx, :]
+        renewable_ratio = renewable_ratio_per_day[day_idx, :]
 
         for v in schedule_per_car.keys():
             for h in schedule_per_car[v]:
@@ -60,7 +59,7 @@ def test_main() -> None:
         pred_hour=8
     )
     avg_green_pred = np.asarray(result_pred['avg_renew_share']).mean()
-    _, avg_green_pred_real = score_charging_plan(result_pred['charging_hours_per_vehicle'], result_pred['total_charges'], renewable_ratio_gt, 0)
+    green_pred_scores, avg_green_pred_real = score_charging_plan(result_pred['charging_hours_per_vehicle'], result_pred['total_charges'], renewable_ratio_gt)
     print(f'   EXPECTED avg_renew_share: {avg_green_pred}')
     print(f'   REAL avg_renew_share: {avg_green_pred_real}')
 
@@ -75,9 +74,11 @@ def test_main() -> None:
         renewability_ratio=renewable_ratio_gt,
         pred_hour=8
     )
-    avg_green_gt = np.asarray(result_gt['avg_renew_share']).mean()
+    #green_gt_scores, avg_green_gt = score_charging_plan(result_gt['charging_hours_per_vehicle'], result_gt['total_charges'], renewable_ratio_gt)
+    
+    green_gt_scores = np.asarray(result_gt['avg_renew_share'])
+    avg_green_gt = green_gt_scores.mean()
     print(f'   REAL avg_renew_share: {avg_green_gt}')
-
     # get the baseline charging schedule
     print(f'computing baseline schedule ...')
     schedule_baseline_one_day = baseline_scheduling(
@@ -93,8 +94,52 @@ def test_main() -> None:
         'charging_hours_per_vehicle': [schedule_baseline_one_day for _ in range(N_days)],
         'total_charges': [len(V) * required_hours for _ in range(N_days)]
     }
-    _, avg_green_baseline = score_charging_plan(schedule_baseline['charging_hours_per_vehicle'], schedule_baseline['total_charges'], renewable_ratio_gt, 0)
+    green_baseline_scores, avg_green_baseline = score_charging_plan(schedule_baseline['charging_hours_per_vehicle'], schedule_baseline['total_charges'], renewable_ratio_gt)
     print(f'   REAL avg_renew_share: {avg_green_baseline}')
+
+    # visualizations
+    fig, ax = plt.subplots(3, 1, figsize=(20, 10))
+    ax[0].plot(renewable_ratio_pred.mean(axis=1) * 100, c='blue', linestyle='-', label='Mean of daily predictions [%]')
+    ax[0].plot(renewable_ratio_gt.values.mean(axis=1) * 100, c='red', linestyle='--', label='Mean of daily GT [%]')
+
+    differences = renewable_ratio_gt.values.mean(axis=1) - renewable_ratio_pred.mean(axis=1)
+
+    red_indices = [i for i, diff in enumerate(differences) if diff < 0]
+    blue_indices = [i for i, diff in enumerate(differences) if diff >= 0]
+
+    ax[1].bar(red_indices, [100*differences[i] for i in red_indices], color='red', label='Pred > GT')
+
+    ax[1].bar(blue_indices, [100*differences[i] for i in blue_indices], color='blue', label='Pred < GT')
+
+    score_pred_diffs = green_pred_scores - green_baseline_scores
+    score_gt_diffs = green_gt_scores - green_baseline_scores
+
+    green_indices = [i for i, diff in enumerate(score_pred_diffs) if diff >= 0]
+    red_indices = [i for i, diff in enumerate(score_pred_diffs) if diff < 0]
+
+    ax[2].bar(green_indices, [100*score_pred_diffs[i] for i in green_indices], color='green', label='Improvement against baseline')
+    ax[2].bar(red_indices, [100*score_pred_diffs[i] for i in red_indices], color='red', label='Not an improvement against baseline')
+    ax[2].plot(range(len(score_gt_diffs)), 100*score_gt_diffs, c='blue', linestyle='-', alpha=0.5, label='Maximum achievable improvement (with perfect model / GT)')
+
+    ax[1].axhline(0, color='black', linewidth=0.8)
+    ax[2].axhline(0, color='black', linewidth=0.8)
+
+    ax[0].set_title('Predicted x GT green ratio')
+    ax[1].set_title('Predicted x GT green ratio error')
+    ax[2].set_title('Optimized x Baseline schedule green ratio comparison')
+    ax[0].legend()
+    ax[1].legend()
+    ax[2].legend()
+
+    ax[0].set_ylabel('%')
+    ax[1].set_ylabel('%')
+    ax[2].set_ylabel('%')
+    
+    ax[0].set_xlabel('days')
+    ax[1].set_xlabel('days')
+    ax[2].set_xlabel('days')
+
+    plt.show()
 
 if __name__ == '__main__':
     test_main()
