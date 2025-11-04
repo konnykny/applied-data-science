@@ -42,7 +42,7 @@ def build_pipeline(data_dir_or_paths, target_column=None):
         ("save_features", SaveORLoad(mode='save')),
         # ("load_features", SaveORLoad(mode='load')),
         ("#4 Train Models", MultiRegXGBoostTraining( #ModelTraining
-            target_column = 'renewable_generation_ratio',
+            target_column = 'green_generation_ratio',
             test_size=0.2,
             random_state=42,
             plot_results=True
@@ -54,7 +54,7 @@ if __name__ == "__main__":
 
     pipeline = build_pipeline(
         data_dir_or_paths='./data', #os.environ.get("DATA_DIR", "."),
-        target_column='renewable_generation_ratio'
+        target_column='green_generation_ratio'
     )
     prediction = pipeline.fit_transform(None)
 #%%

@@ -38,7 +38,7 @@ X_forbidden_cols = [
 
     'total_fossil_generation',
     'total_renewable_generation',
-    # 'renewable_generation_ratio',
+    # 'green_generation_ratio',
 
     # 'time__original_tz',
 ]
@@ -82,7 +82,7 @@ def _plot_metrics(y_true, y_pred, title="Model Performance"):
 
 @dataclass
 class ModelTraining(BaseEstimator, RegressorMixin):
-    target_column: Optional[str] = 'renewable_generation_ratio'
+    target_column: Optional[str] = 'green_generation_ratio'
     test_size: float = 0.2
     random_state: int = 42
     prediction_horizon: int = 24
