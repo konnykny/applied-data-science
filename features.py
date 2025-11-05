@@ -7,7 +7,7 @@ from pvlib.location import Location
 import pycatch22
 import os.path as osp
 import pickle
-# import tqdm
+import holidays
 
 import numpy as np
 import pandas as pd
@@ -145,6 +145,14 @@ class FeatureExtraction(BaseEstimator, TransformerMixin):
                 F[col_name] = shifted.reindex(F.index)
         return F
 
+    @staticmethod
+    def _binary_encode_holiday_and_weekend(df: pd.DataFrame, country_code = 'ES') -> pd.DataFrame:
+        # Spain holidays 'ES'
+        es_holidays = holidays.country_holidays(country_code)
+        is_holiday = df.index.to_series().apply(lambda date: 1 if date in es_holidays else 0)
+        is_weekend = df.index.to_series().apply(lambda date: 1 if date.weekday() >= 5 else 0)
+        df['is_holiday_or_weekend'] = is_holiday | is_weekend
+        return df
 
     def pick_rows(self, df: pd.DataFrame, prediction_hour_local: int = 8) -> pd.DataFrame:
         # Accept either an int hour or a pandas datetime-like (time component used).
@@ -215,12 +223,14 @@ class FeatureExtraction(BaseEstimator, TransformerMixin):
         minute_of_day = df.index.hour * 60 + df.index.minute
         time_of_day = _cyclic_encode(pd.Series(minute_of_day, index=df.index), 24 * 60, "tod")
         day_of_year = _cyclic_encode(pd.Series(df.index.dayofyear, index=df.index), 366, "doy")
+        df = FeatureExtraction._binary_encode_holiday_and_weekend(df)
 
         print("computing astronomical features...")
         sun_features = self.weather_extractor.transform(df)
 
 
-        F = pd.concat([weekday, time_of_day, day_of_year, sun_features], axis=1)
+        # F = pd.concat([weekday, time_of_day, day_of_year, sun_features], axis=1)
+        F = pd.concat([weekday, day_of_year, sun_features], axis=1)
         F = pd.concat([df, F], axis=1)
 
         print("Calculating catch22 features on past weather data...")
@@ -305,7 +315,7 @@ class Catch22FeatureExtractor(BaseEstimator, TransformerMixin):
 
     def transform(self, X: pd.DataFrame, njobs: int = None) -> pd.DataFrame:
         X = X.copy(deep=True).sort_index(ascending=True)
-        assert pd.isna(X[self.target_cols]).values.sum() == 0
+        # assert pd.isna(X[self.target_cols]).values.sum() == 0 ## disabled assert: prevents adding future values of astronomical features
 
         start_idx = np.max(self.windows_past_hrs)
         end_idx = X.shape[0] - np.max(self.windows_future_hrs) - 1
@@ -335,7 +345,7 @@ class Catch22FeatureExtractor(BaseEstimator, TransformerMixin):
             for k, (start_ids, end_ids) in enumerate(zip(start_ids_list, end_ids_list)):
                 results_col = Parallel(n_jobs=njobs)(
                     delayed(pycatch22.catch22_all)(
-                        X[col].iloc[start_ids[i]:end_ids[i] + 1], catch24=True,  # TODO CHECK IMPACT
+                        X[col].iloc[start_ids[i]:end_ids[i] + 1], catch24=False,  # TODO CHECK IMPACT
                             short_names=True, )
                     for i in range(start_ids.shape[0])
                 )

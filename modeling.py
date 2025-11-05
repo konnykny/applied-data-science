@@ -258,23 +258,14 @@ class  MultiRegXGBoostTraining(ModelTraining):
         X = X.dropna(axis=0, how='any')
         X = X.drop(columns=['Unnamed: 0'], errors='ignore') # exists when loaded from pickle sometimes
 
-        print("data_____________")
-        print(X)
-
-        print("y_____________")
-        print(y)
-
-        # X_final = X
-        # y_final = y
-
         # chronological split
         X_tr, X_te, y_tr, y_te, time_tr, time_te = _chronological_split(X, y, time_col.loc[X.index], test_size=self.test_size)
 
         # Train multioutput XGBoost via sklearn wrapper
         base = xgb.XGBRegressor(
-            n_estimators=500, learning_rate=0.05, max_depth=6,
+            n_estimators=600, learning_rate=0.05, max_depth=8,
             subsample=0.8, colsample_bytree=0.8, reg_lambda=1.0,
-            random_state=self.random_state, verbosity=1, n_jobs=-1,
+            random_state=self.random_state, verbosity=2, n_jobs=-1,
             objective='reg:squarederror'
         )
 
@@ -362,11 +353,15 @@ class  MultiRegXGBoostTraining(ModelTraining):
         with open('./models.pkl', 'wb') as f:
             pickle.dump({'model': model}, f)
 
-        # Build and return a DataFrame indexed by the original time values (time_te)
         try:
             gt_df = pd.DataFrame(y_te).copy()
+            # rename ground truth columns to ground_truth_{target}
+            gt_df.columns = [f'ground_truth_{c}' for c in gt_df.columns]
+
             pred_df = pd.DataFrame(y_pred, index=y_te.index, columns=[f'pred_{c}' for c in y_te.columns])
+
             results_df = pd.concat([gt_df, pred_df], axis=1)
+
             # set index to the datetime index from the chronological split (use original time_col aligned to y_te)
             results_df.index = pd.to_datetime(time_col.loc[y_te.index])
         except Exception:
@@ -376,5 +371,5 @@ class  MultiRegXGBoostTraining(ModelTraining):
 
         return self
 
-    def transform(self, X: pd.DataFrame) -> np.ndarray: # transform = predict
+    def transform(self, X: pd.DataFrame): # transform = predict
         return self.results_df
