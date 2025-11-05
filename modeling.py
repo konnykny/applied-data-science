@@ -344,10 +344,7 @@ class  MultiRegXGBoostTraining(ModelTraining):
                 'x': X_te,
                 'preds': y_pred,
                 'gt': y_te,
-                'adjusted_preds': self._postprocess_predictions(pd.DataFrame(y_pred, index=y_te.index), time_te),
-                'adjusted_gt': self._postprocess_predictions(y_te, time_te),
                 'time': time_col,
-                'pred_time': self._postprocess_predictions(time_te.copy(deep=True), time_te)
             }, f)
 
         with open('./models.pkl', 'wb') as f:
