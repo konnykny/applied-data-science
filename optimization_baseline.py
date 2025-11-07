@@ -18,13 +18,13 @@ def baseline_scheduling(
     charging_schedule = {v: [] for v in V}
     hourly_usage = {t: 0 for t in T}
 
-    # Create a list of hours in a circular manner starting from pred_hour
-    circular_hours = list(range(pred_hour, 24)) + list(range(0, pred_hour))
-
     # Try to assign charging slots starting from pred_hour
     for v in V:
+        # Get available hours for the car
         available_hours = [t for t in T if availability_dict[v, t] == 1]
-        available_hours_sorted = sorted(available_hours, key=lambda x: (x < pred_hour, x))
+
+        # Sort available hours based on circular distance from pred_hour
+        available_hours_sorted = sorted(available_hours, key=lambda x: (x - pred_hour) % 24)
 
         assigned_hours = []
         for hour in available_hours_sorted:
@@ -33,11 +33,11 @@ def baseline_scheduling(
                 hourly_usage[hour] += 1
                 if len(assigned_hours) == required_hours:
                     break
-
         if len(assigned_hours) < required_hours:
             raise ValueError(f"Cannot schedule {required_hours} hours for car {v} within the constraints.")
 
-        charging_schedule[v] = assigned_hours
+        # Store hours as offsets from pred_hour
+        charging_schedule[v] = [(h - pred_hour) % 24 for h in assigned_hours]
 
     return charging_schedule
 
@@ -56,6 +56,7 @@ def score_charging_plan(charging_schedule_per_day: List[Dict], total_charges_per
     return daily_renew_ratios, daily_renew_ratios.mean()
 
 def visualize_schedule(charging_schedule: Dict, car_name_list: List[str], pred_hour: int = 8):
+    print(charging_schedule)
     fig, ax = plt.subplots(figsize=(10, 5))
 
     for car, hours in charging_schedule.items():
@@ -74,7 +75,7 @@ def visualize_schedule(charging_schedule: Dict, car_name_list: List[str], pred_h
     ax.set_title('Charging Schedule Visualization')
 
     plt.grid(True)
-    plt.show()
+    plt.show(block=False)
 
 def demo_baseline_main():
     # --- Sets and parameters ---

@@ -286,8 +286,10 @@ class  MultiRegXGBoostTraining(ModelTraining):
 
 
 
-        # --- New: compute and visualise R2 per prediction horizon ---
+        # --- New: compute and visualise R2, RMSE and mae per prediction horizon ---
         try:
+            
+            # r2
             horizon_r2 = []
             for i in range(n_targets):
                 h_r2 = r2_score(y_te.iloc[:, i], y_pred[:, i])
@@ -297,14 +299,52 @@ class  MultiRegXGBoostTraining(ModelTraining):
             x = list(range(1, n_targets + 1))
             plt.bar(x, horizon_r2, color='C0', alpha=0.8)
             plt.xlabel('Horizon (hours ahead)')
-            plt.ylabel('R2')
-            plt.title('[MultiRegXGBoostTraining] R2 per predicted hour')
+            plt.ylabel(r'$R^{2}$')
+            plt.title('[MultiRegXGBoostTraining] $R^{2}$ per predicted hour')
             plt.xticks(x)
             plt.grid(axis='y', alpha=0.3)
             plt.tight_layout()
             plt.savefig('./r2_by_horizon.png')
             plt.close()
             print('[MultiRegXGBoostTraining] Saved R2 per horizon plot to ./r2_by_horizon.png')
+
+            # rmse
+            horizon_rmse = []
+            for i in range(n_targets):
+                h_rmse = root_mean_squared_error(y_te.iloc[:, i], y_pred[:, i])
+                horizon_rmse.append(h_rmse)
+
+            plt.figure(figsize=(10, 4))
+            x = list(range(1, n_targets + 1))
+            plt.bar(x, horizon_rmse, color='C0', alpha=0.8)
+            plt.xlabel('Horizon (hours ahead)')
+            plt.ylabel('RMSE')
+            plt.title('[MultiRegXGBoostTraining] RMSE per predicted hour')
+            plt.xticks(x)
+            plt.grid(axis='y', alpha=0.3)
+            plt.tight_layout()
+            plt.savefig('./rmse_by_horizon.png')
+            plt.close()
+            print('[MultiRegXGBoostTraining] Saved RMSE per horizon plot to ./rmse_by_horizon.png')
+
+            # mae
+            horizon_mae = []
+            for i in range(n_targets):
+                h_mae = mean_absolute_error(y_te.iloc[:, i], y_pred[:, i])
+                horizon_mae.append(h_mae)
+
+            plt.figure(figsize=(10, 4))
+            x = list(range(1, n_targets + 1))
+            plt.bar(x, horizon_mae, color='C0', alpha=0.8)
+            plt.xlabel('Horizon (hours ahead)')
+            plt.ylabel('MAE')
+            plt.title('[MultiRegXGBoostTraining] MAE per predicted hour')
+            plt.xticks(x)
+            plt.grid(axis='y', alpha=0.3)
+            plt.tight_layout()
+            plt.savefig('./mae_by_horizon.png')
+            plt.close()
+            print('[MultiRegXGBoostTraining] Saved MAE per horizon plot to ./mae_by_horizon.png')
         except Exception as e:
             print('[MultiRegXGBoostTraining] Could not create R2 per-horizon plot:', e)
 
@@ -345,6 +385,7 @@ class  MultiRegXGBoostTraining(ModelTraining):
                 'preds': y_pred,
                 'gt': y_te,
                 'time': time_col,
+                'tst_time': time_te,
             }, f)
 
         with open('./models.pkl', 'wb') as f:
